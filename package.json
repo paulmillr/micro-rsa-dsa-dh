@@ -64,6 +64,15 @@
     "format": "prettier --write src",
     "test": "node test/index.test.mjs"
   },
-  "keywords": [],
+  "keywords": [
+    "rsa",
+    "dsa",
+    "dh",
+    "elgamal",
+    "diffie-hellman",
+    "prime",
+    "cryptography",
+    "noble"
+  ],
   "funding": "https://paulmillr.com/funding/"
 }

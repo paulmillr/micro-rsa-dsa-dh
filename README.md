@@ -18,6 +18,8 @@ Minimal implementation of older cryptography algorithms: RSA, DSA, DH.
 
 We support all major platforms and runtimes.
 
+A standalone file [micro-rsa-dsa-dh.js](https://github.com/paulmillr/micro-rsa-dsa-dh/releases) is also available.
+
 - [All imports](#all-imports)
 - [RSA](#rsa)
     - [OAEP](#oaep)

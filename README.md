@@ -81,6 +81,7 @@ Use if you need KEM (encrypt/decrypt).
 
 ```ts
 import * as rsa from 'micro-rsa-dsa-dh/rsa.js';
+import { sha256 } from '@noble/hashes/sha2';
 const alice = rsa.keygen(2048);
 const oaep = rsa.OAEP(sha256, rsa.mgf1(sha256));
 const msg = new Uint8Array([1, 2, 3]);
@@ -94,6 +95,7 @@ Use if you need signatures (sign/verify).
 
 ```ts
 import * as rsa from 'micro-rsa-dsa-dh/rsa.js';
+import { sha256 } from '@noble/hashes/sha2';
 const alice = rsa.keygen(2048);
 const pss = rsa.PSS(sha256, rsa.mgf1(sha256));
 const msg = new Uint8Array([1, 2, 3]);
@@ -166,6 +168,7 @@ Same as ECDSA, but with big numbers. Cons:
 
 ```ts
 import * as dsa from 'micro-rsa-dsa-dh/dsa.js';
+import { sha256 } from '@noble/hashes/sha2';
 // 1. Params
 // Carol generates random params
 const carolParams = dsa.genDSAParams(2048, 256, sha256, 1);

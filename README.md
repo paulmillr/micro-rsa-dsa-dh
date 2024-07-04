@@ -78,6 +78,7 @@ OAEP is Optimal Asymmetric Encryption Padding.
 Use if you need KEM (encrypt/decrypt).
 
 ```ts
+import * as rsa from 'micro-rsa-dsa-dh/rsa.js';
 const alice = rsa.keygen(2048);
 const oaep = rsa.OAEP(sha256, rsa.mgf1(sha256));
 const msg = new Uint8Array([1, 2, 3]);
@@ -90,6 +91,7 @@ deepStrictEqual(oaep.decrypt(alice.privateKey, encrypted), msg);
 Use if you need signatures (sign/verify).
 
 ```ts
+import * as rsa from 'micro-rsa-dsa-dh/rsa.js';
 const alice = rsa.keygen(2048);
 const pss = rsa.PSS(sha256, rsa.mgf1(sha256));
 const msg = new Uint8Array([1, 2, 3]);
@@ -104,6 +106,7 @@ This is old standard, OAEP/PSS is better.
 Signatures:
 
 ```ts
+import * as rsa from 'micro-rsa-dsa-dh/rsa.js';
 const alice = rsa.keygen(2048);
 const pkcs = rsa.PKCS1_SHA256;
 const msg = new Uint8Array([1, 2, 3]);
@@ -116,6 +119,7 @@ KEM (vulnerable [[1]](https://crypto.stackexchange.com/questions/12688/can-you-e
 ):
 
 ```ts
+import * as rsa from 'micro-rsa-dsa-dh/rsa.js';
 const alice = rsa.keygen(2048);
 const pkcs = rsa.PKCS1_KEM;
 const msg = new Uint8Array([1, 2, 3]);
@@ -132,16 +136,17 @@ Same as ECDH, seems safe if pre-defined groups are used. Cons:
 - Using custom non-standard groups can make algorithm weak
 
 ```ts
-const nobleDH = rsa.DH('modp18');
-const alicePriv = nobleDH.randomPrivateKey();
-const alicePub = nobleDH.getPublicKey(alicePriv);
+import { DH, DHGroups } from 'micro-rsa-dsa-dh/dh.js';
+const dh = DH('modp18');
+const alicePriv = dh.randomPrivateKey();
+const alicePub = dh.getPublicKey(alicePriv);
 
-const bobPriv = nobleDH.randomPrivateKey();
-const bobPub = nobleDH.getPublicKey(bobPriv);
+const bobPriv = dh.randomPrivateKey();
+const bobPub = dh.getPublicKey(bobPriv);
 
 deepStrictEqual(
-  nobleDH.getSharedSecret(alicePriv, bobPub),
-  nobleDH.getSharedSecret(bobPriv, alicePub)
+  dh.getSharedSecret(alicePriv, bobPub),
+  dh.getSharedSecret(bobPriv, alicePub)
 );
 ```
 
@@ -158,28 +163,29 @@ Same as ECDSA, but with big numbers. Cons:
 - Harder to protect from timing attacks
 
 ```ts
+import * as dsa from 'micro-rsa-dsa-dh/dsa.js';
 // 1. Params
 // Carol generates random params
-const carolParams = rsa.genDSAParams(2048, 256, sha256, 1);
+const carolParams = dsa.genDSAParams(2048, 256, sha256, 1);
 // Instead of sending primes to Alice and Bob (which can be insecure), she sends seed
 // This ensures that params are not constructed primes, but generated randomly:
 // Alice and Bob can use these params without trusting Carol.
 const seed = carolParams.domainParameterSeed;
 
-const aliceParams = rsa.genDSAParams(2048, 256, sha256, 1, seed);
+const aliceParams = dsa.genDSAParams(2048, 256, sha256, 1, seed);
 deepStrictEqual(aliceParams, carolParams); // Same params as Carol!
 
-const bobParams = rsa.genDSAParams(2048, 256, sha256, 1, seed);
+const bobParams = dsa.genDSAParams(2048, 256, sha256, 1, seed);
 deepStrictEqual(aliceParams, bobParams); // Now Bob has same params too!
 
 // 2. Keys
-const aliceDSA = rsa.DSA(aliceParams);
+const aliceDSA = dsa.DSA(aliceParams);
 const alicePrivKey = aliceDSA.randomPrivateKey();
 const alicePubKey = aliceDSA.getPublicKey(alicePrivKey); // Alice generates public key and sends to Bob
 const msg = new Uint8Array([1, 2, 3, 4, 5]);
 const sig = aliceDSA.sign(alicePrivKey, msg); // Alice signs message
 
-const bobDSA = rsa.DSA(bobParams);
+const bobDSA = dsa.DSA(bobParams);
 // Now Bob can verify that message was sent by Alice (and not Carol for example).
 deepStrictEqual(bobDSA.verify(alicePubKey, msg, sig), true);
 ```
@@ -189,9 +195,10 @@ deepStrictEqual(bobDSA.verify(alicePubKey, msg, sig), true);
 Mostly for educational purpose: almost nobody uses it.
 
 ```ts
+import { ElGamal, genElGamalParams } from 'micro-rsa-dsa-dh/elgamal.js';
 // NOTE: this is super slow! 512: 1s, 1024: 20s, 2048: 1046s
-const params = rsa.genElGamalParams(512);
-const elgamal = rsa.ElGamal(params);
+const params = genElGamalParams(512);
+const elgamal = ElGamal(params);
 
 const alicePriv = elgamal.randomPrivateKey();
 const alicePub = elgamal.getPublicKey(alicePriv);

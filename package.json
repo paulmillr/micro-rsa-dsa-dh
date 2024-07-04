@@ -1,0 +1,69 @@
+{
+  "name": "micro-rsa-dsa-dh",
+  "version": "0.1.0",
+  "description": "Minimal implementation of older cryptography algorithms: RSA, DSA, DH",
+  "files": [
+    "*.js",
+    "*.d.ts",
+    "*.map",
+    "esm",
+    "src"
+  ],
+  "dependencies": {
+    "@noble/hashes": "1.4.0"
+  },
+  "devDependencies": {
+    "@paulmillr/jsbt": "0.2.1",
+    "micro-should": "0.4.0",
+    "prettier": "3.1.1",
+    "typescript": "5.5.2"
+  },
+  "main": "./index.js",
+  "module": "./esm/index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./esm/index.js",
+      "require": "./index.js"
+    },
+    "./dh.js": {
+      "import": "./esm/dh.js",
+      "require": "./dh.js"
+    },
+    "./dsa.js": {
+      "import": "./esm/dsa.js",
+      "require": "./dsa.js"
+    },
+    "./elgamal.js": {
+      "import": "./esm/elgamal.js",
+      "require": "./elgamal.js"
+    },
+    "./primality.js": {
+      "import": "./esm/primality.js",
+      "require": "./primality.js"
+    },
+    "./rsa.js": {
+      "import": "./esm/rsa.js",
+      "require": "./rsa.js"
+    },
+    "./utils.js": {
+      "import": "./esm/utils.js",
+      "require": "./utils.js"
+    }
+  },
+  "author": "Paul Miller (https://paulmillr.com)",
+  "license": "MIT",
+  "homepage": "https://github.com/paulmillr/micro-rsa-dsa-dh",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/paulmillr/micro-rsa-dsa-dh.git"
+  },
+  "scripts": {
+    "build": "tsc && tsc -p tsconfig.esm.json",
+    "lint": "prettier --check src",
+    "format": "prettier --write src",
+    "test": "node test/index.test.mjs"
+  },
+  "keywords": [],
+  "funding": "https://paulmillr.com/funding/"
+}

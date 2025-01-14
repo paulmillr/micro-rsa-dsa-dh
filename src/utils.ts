@@ -16,10 +16,7 @@ export type Hash = {
 export type Hex = Uint8Array | string; // hex strings are accepted for simplicity
 
 function isBytes(a: unknown): a is Uint8Array {
-  return (
-    a instanceof Uint8Array ||
-    (ArrayBuffer.isView(a) && a.constructor.name === 'Uint8Array')
-  );
+  return a instanceof Uint8Array || (ArrayBuffer.isView(a) && a.constructor.name === 'Uint8Array');
 }
 
 /**

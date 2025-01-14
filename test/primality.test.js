@@ -1,9 +1,9 @@
-import { deepStrictEqual } from 'assert';
+import { deepStrictEqual } from 'node:assert';
 import { should, describe } from 'micro-should';
 import * as primality from '../esm/primality.js';
 import { sqrt, gcd } from '../esm/utils.js';
 import { IFCPrimes } from '../esm/rsa.js';
-import { jsonGZ, parseTestFile } from './utils.mjs';
+import { jsonGZ, parseTestFile } from './utils.js';
 
 describe('primality', () => {
   const { millerRabinBaseTest, jacobi } = primality;
@@ -228,13 +228,9 @@ describe('primality', () => {
         total += t;
         n++;
       }
-      console.log('AVG', len, total, n, total / n);
+      // console.log('AVG', len, total, n, total / n);
     }
   });
 });
 
-// ESM is broken.
-import url from 'node:url';
-if (import.meta.url === url.pathToFileURL(process.argv[1]).href) {
-  should.run();
-}
+should.runWhen(import.meta.url);

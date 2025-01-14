@@ -1,4 +1,4 @@
-import { deepStrictEqual } from 'assert';
+import { deepStrictEqual } from 'node:assert';
 import { should, describe } from 'micro-should';
 import { DH } from '../esm/dh.js';
 import * as crypto from 'node:crypto';
@@ -69,8 +69,4 @@ describe('DH', () => {
   });
 });
 
-// ESM is broken.
-import url from 'node:url';
-if (import.meta.url === url.pathToFileURL(process.argv[1]).href) {
-  should.run();
-}
+should.runWhen(import.meta.url);

@@ -1,9 +1,9 @@
 import { sha256 } from '@noble/hashes/sha256';
-import { deepStrictEqual, throws } from 'assert';
+import { deepStrictEqual, throws } from 'node:assert';
 import { describe, should } from 'micro-should';
 import * as fs from 'node:fs';
 import * as rsa from '../esm/rsa.js';
-import { bytesToHex, HASHES, hexToBytes, jsonGZ } from './utils.mjs';
+import { bytesToHex, HASHES, hexToBytes, jsonGZ } from './utils.js';
 
 function parseRSADPComponent(filePath) {
   const data = fs.readFileSync(filePath, 'utf-8');
@@ -347,8 +347,4 @@ describe('RSA', () => {
   });
 });
 
-// ESM is broken.
-import url from 'node:url';
-if (import.meta.url === url.pathToFileURL(process.argv[1]).href) {
-  should.run();
-}
+should.runWhen(import.meta.url);

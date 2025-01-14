@@ -1,5 +1,5 @@
 import { hmac } from '@noble/hashes/hmac';
-import { concatBytes, hexToBytes, randomBytes } from '@noble/hashes/utils';
+import { concatBytes, hexToBytes, isBytes, randomBytes } from '@noble/hashes/utils';
 import { isProbablePrime } from './primality.js';
 import {
   bytesToNumber,
@@ -107,21 +107,21 @@ function genDSAPrimes(
   if (!pairs[L].includes(N)) throw new Error(`Invalid L/N pair: possible N=${pairs[L]}`);
   const outlen = hash.outputLen * 8;
   // NOTE: we ask user to provide seed instead
-  if (!Number.isSafeInteger(seed) && !(seed instanceof Uint8Array) && seed !== undefined)
+  if (!Number.isSafeInteger(seed) && !isBytes(seed) && seed !== undefined)
     throw new Error('wrong seed: should be number of bits or Uint8Array');
   const seedOrLen = seed || N;
-  const seedlen = seedOrLen instanceof Uint8Array ? seedOrLen.length * 8 : seedOrLen;
+  const seedlen = isBytes(seedOrLen) ? seedOrLen.length * 8 : seedOrLen;
   if (seedlen < N || seedlen % 8 !== 0) throw new Error('invalid seedlen');
   const seedBytesLen = seedlen / 8;
   const n = Math.ceil(L / outlen) - 1; // 3
   const b = L - 1 - n * outlen; // 4
   const mask = 2n ** BigInt(N - 1);
   while (true) {
-    const domainParameterSeed = seedOrLen instanceof Uint8Array ? seedOrLen : randFn(seedBytesLen);
+    const domainParameterSeed = isBytes(seedOrLen) ? seedOrLen : randFn(seedBytesLen);
     const U = bytesToNumber(hash(domainParameterSeed)) % mask; // 6
     let q = mask + U + 1n - (U % 2n); // 7
     if (!isProbablePrimeDSA_Q(N, q, randFn)) {
-      if (seed instanceof Uint8Array) throw new Error('Fixed seed, Q is not prime');
+      if (isBytes(seed)) throw new Error('Fixed seed, Q is not prime');
       continue; // 9
     }
     let offset = 1n; // 10
@@ -159,7 +159,7 @@ function genDSAGenerator(res: ReturnType<typeof genDSAPrimes>, index: number): b
   if (
     typeof p !== 'bigint' ||
     typeof q !== 'bigint' ||
-    !(domainParameterSeed instanceof Uint8Array) ||
+    !isBytes(domainParameterSeed) ||
     typeof hash !== 'function'
   ) {
     throw new Error('wrong params');

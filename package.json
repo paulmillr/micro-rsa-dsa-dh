@@ -59,7 +59,7 @@
     "url": "git+https://github.com/paulmillr/micro-rsa-dsa-dh.git"
   },
   "scripts": {
-    "build": "tsc && tsc -p tsconfig.esm.json",
+    "build": "tsc && tsc -p tsconfig.cjs.json",
     "lint": "prettier --check src",
     "format": "prettier --write src",
     "test": "node test/index.js",

@@ -1,5 +1,5 @@
 import { randomBytes } from '@noble/hashes/utils';
-import { gcd, mod, numberToBytes, pow, RandFn, randomBits } from './utils.js';
+import { gcd, mod, numberToBytes, pow, type RandFn, randomBits } from './utils.js';
 
 // Non-deterministic Miller-Rabin test over random bases (multiple iterations).
 // This test is probabilistic and may produce false positives (pseudoprimes).
@@ -66,7 +66,7 @@ export function millerRabin(w: bigint, iterations: number, randFn: RandFn = rand
 }
 
 // Deterministic version of Miller-Rabin test with fixed base
-export function millerRabinBaseTest(w: bigint, base: bigint) {
+export function millerRabinBaseTest(w: bigint, base: bigint): boolean {
   return millerRabin(w, 1, (len) => numberToBytes(base, len));
 }
 
@@ -189,7 +189,7 @@ function checkSieve(n: bigint) {
  * @param randFn
  * @returns true if probable prime
  */
-export function bailliePSW(n: bigint) {
+export function bailliePSW(n: bigint): boolean {
   const sieveRes = checkSieve(n);
   if (sieveRes !== undefined) return sieveRes;
   // BPSW does single iteration of M-R with fixed base 2
@@ -212,7 +212,7 @@ export function isProbablePrime(n: bigint, iters: number, randFn: RandFn = rando
   return lucas(n);
 }
 
-export function isProbablePrimeRSA(n: bigint, randFn: RandFn = randomBytes) {
+export function isProbablePrimeRSA(n: bigint, randFn: RandFn = randomBytes): boolean {
   // - https://crypto.stackexchange.com/questions/104265/iteration-count-for-enhanced-miller-rabin
   // - https://github.com/openssl/openssl/blob/master/crypto/bn/bn_rsa_fips186_4.c
   const nLen = n.toString(2).length;

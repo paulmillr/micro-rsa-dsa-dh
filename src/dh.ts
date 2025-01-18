@@ -14,7 +14,7 @@ export type DHGroup = {
   g: bigint; // Generator
 };
 
-export const DHGroups = {
+export const DHGroups: Record<string, DHGroup> = {
   modp1: {
     p: BigInt(
       '0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd1' +
@@ -209,7 +209,13 @@ export const DHGroups = {
  * @param group well-known modp group or {p: bigint, g: bigint};
  * @returns
  */
-export const DH = (group: keyof DHGroup | DHGroup) => {
+export const DH = (
+  group: keyof DHGroup | DHGroup
+): {
+  randomPrivateKey(): Uint8Array;
+  getPublicKey(privateKey: Uint8Array): Uint8Array;
+  getSharedSecret(privateA: Uint8Array, publicB: Uint8Array): Uint8Array;
+} => {
   if (typeof group === 'string')
     group = (DHGroups as Record<string, DHGroup>)[group as keyof DHGroup];
   if (!group) throw new Error('DH: wrong group');
@@ -234,4 +240,4 @@ export const DH = (group: keyof DHGroup | DHGroup) => {
   };
 };
 
-export const diffieHellman = DH;
+export const diffieHellman: typeof DH = DH;

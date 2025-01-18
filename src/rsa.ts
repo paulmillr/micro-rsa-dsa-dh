@@ -5,10 +5,10 @@ import { sha384, sha512, sha512_224, sha512_256 } from '@noble/hashes/sha512';
 import { concatBytes, createView, hexToBytes, randomBytes } from '@noble/hashes/utils';
 import { isProbablePrimeRSA } from './primality.js';
 import {
-  Hash,
+  type Hash,
   I2OSP,
   OS2IP,
-  RandFn,
+  type RandFn,
   ensureBytes,
   gcd,
   invert,
@@ -226,7 +226,11 @@ function RSAVP1(publicKey: { n: bigint; e: bigint }, s: bigint): bigint | false 
  * @param e - The public exponent.
  * @returns An object containing the public key and the private key.
  */
-export function keygen(nlen: number, e: bigint = 0x10001n, randFn: RandFn = randomBytes) {
+export function keygen(
+  nlen: number,
+  e: bigint = 0x10001n,
+  randFn: RandFn = randomBytes
+): { publicKey: { e: bigint; n: bigint }; privateKey: { d: bigint; n: bigint } } {
   if (!Number.isSafeInteger(nlen) || nlen <= 0) throw new Error('wrong nlen');
   const { p, q } = IFCPrimes(nlen, e, undefined, undefined, randFn);
   const n = p * q;
@@ -458,10 +462,14 @@ export const PKCS1_KEM: KEM = {
   },
 };
 
+export interface IPKCS {
+  verify(publicKey: PublicKey, M: Uint8Array, S: Uint8Array): boolean;
+  sign(privateKey: PrivateKey, M: Uint8Array): Uint8Array;
+}
 /**
  * RSASSA-PKCS1-v1_5: old Signature Scheme with Appendix (SSA) as first standardized in version 1.5 of PKCS #1.
  */
-const PKCS1 = (hash: Hash, prefix: string) => ({
+const PKCS1 = (hash: Hash, prefix: string): IPKCS => ({
   verify(publicKey: PublicKey, M: Uint8Array, S: Uint8Array): boolean {
     validatePublicKey(publicKey);
     M = ensureBytes('message', M);
@@ -490,35 +498,47 @@ const PKCS1 = (hash: Hash, prefix: string) => ({
 });
 
 // Encoded OIDs
-export const PKCS1_SHA1 = /* @__PURE__ */ PKCS1(sha1, '3021300906052b0e03021a05000414');
-export const PKCS1_SHA224 = /* @__PURE__ */ PKCS1(sha224, '302d300d06096086480165030402040500041c');
-export const PKCS1_SHA256 = /* @__PURE__ */ PKCS1(sha256, '3031300d060960864801650304020105000420');
-export const PKCS1_SHA384 = /* @__PURE__ */ PKCS1(sha384, '3041300d060960864801650304020205000430');
-export const PKCS1_SHA512 = /* @__PURE__ */ PKCS1(sha512, '3051300d060960864801650304020305000440');
-export const PKCS1_SHA512_224 = /* @__PURE__ */ PKCS1(
+export const PKCS1_SHA1: IPKCS = /* @__PURE__ */ PKCS1(sha1, '3021300906052b0e03021a05000414');
+export const PKCS1_SHA224: IPKCS = /* @__PURE__ */ PKCS1(
+  sha224,
+  '302d300d06096086480165030402040500041c'
+);
+export const PKCS1_SHA256: IPKCS = /* @__PURE__ */ PKCS1(
+  sha256,
+  '3031300d060960864801650304020105000420'
+);
+export const PKCS1_SHA384: IPKCS = /* @__PURE__ */ PKCS1(
+  sha384,
+  '3041300d060960864801650304020205000430'
+);
+export const PKCS1_SHA512: IPKCS = /* @__PURE__ */ PKCS1(
+  sha512,
+  '3051300d060960864801650304020305000440'
+);
+export const PKCS1_SHA512_224: IPKCS = /* @__PURE__ */ PKCS1(
   sha512_224,
   '302d300d06096086480165030402050500041c'
 );
-export const PKCS1_SHA512_256 = /* @__PURE__ */ PKCS1(
+export const PKCS1_SHA512_256: IPKCS = /* @__PURE__ */ PKCS1(
   sha512_256,
   '3031300d060960864801650304020605000420'
 );
 // https://github.com/usnistgov/ACVP-Server/issues/257#issuecomment-1502669140
-export const PKCS1_SHA3_224 = /* @__PURE__ */ PKCS1(
+export const PKCS1_SHA3_224: IPKCS = /* @__PURE__ */ PKCS1(
   sha3_224,
   '302d300d06096086480165030402070500041c'
 );
-export const PKCS1_SHA3_256 = /* @__PURE__ */ PKCS1(
+export const PKCS1_SHA3_256: IPKCS = /* @__PURE__ */ PKCS1(
   sha3_256,
   '3031300d060960864801650304020805000420'
 );
-export const PKCS1_SHA3_384 = /* @__PURE__ */ PKCS1(
+export const PKCS1_SHA3_384: IPKCS = /* @__PURE__ */ PKCS1(
   sha3_384,
   '3041300d060960864801650304020905000430'
 );
-export const PKCS1_SHA3_512 = /* @__PURE__ */ PKCS1(
+export const PKCS1_SHA3_512: IPKCS = /* @__PURE__ */ PKCS1(
   sha3_512,
   '3051300d060960864801650304020a05000440'
 );
 
-export const _TEST = { RSAEP, RSADP, RSASP1 };
+export const _TEST: any = { RSAEP, RSADP, RSASP1 };

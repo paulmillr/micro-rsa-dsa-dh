@@ -41,7 +41,7 @@ export const ElGamal = ({ p, g }: ElGamalParams) => {
     randomPrivateKey(): bigint {
       return randomBigInt(pBytes, 2n, p - 1n); // [2, p-1)
     },
-    getPublicKey(privateKey: bigint) {
+    getPublicKey(privateKey: bigint): bigint {
       if (typeof privateKey !== 'bigint') throw new Error('privateKey should be bigint');
       return pow(g, privateKey, p);
     },
@@ -56,7 +56,7 @@ export const ElGamal = ({ p, g }: ElGamalParams) => {
       const c2 = (message * yk) % p;
       return { ct1: c1, ct2: c2 };
     },
-    decrypt(privateKey: bigint, ciphertext: { ct1: bigint; ct2: bigint }) {
+    decrypt(privateKey: bigint, ciphertext: { ct1: bigint; ct2: bigint }): bigint {
       if (typeof privateKey !== 'bigint') throw new Error('privateKey should be bigint');
       if (typeof ciphertext.ct1 !== 'bigint' || typeof ciphertext.ct2 !== 'bigint')
         throw new Error('invalid ciphertext');

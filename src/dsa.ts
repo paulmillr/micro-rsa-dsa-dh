@@ -5,7 +5,7 @@ import {
   bytesToNumber,
   getFieldBytesLength,
   getMinHashLength,
-  Hash,
+  type Hash,
   I2OSP,
   invert,
   mapHashToField,
@@ -13,16 +13,17 @@ import {
   numberToBytes,
   OS2IP,
   pow,
-  RandFn,
+  type RandFn,
 } from './utils.js';
 
+export class DERErr extends Error {
+  constructor(m = '') {
+    super(m);
+  }
+}
 export const DER = {
   // asn.1 DER encoding utils
-  Err: class DERErr extends Error {
-    constructor(m = '') {
-      super(m);
-    }
-  },
+  Err: DERErr satisfies typeof DERErr as typeof DERErr,
   _parseInt(data: Uint8Array): { d: bigint; l: Uint8Array } {
     const { Err: E } = DER;
     if (data.length < 2 || data[0] !== 0x02) throw new E('Invalid signature integer tag');
@@ -199,7 +200,7 @@ export function genDSAParams(
   hash: Hash,
   index: number,
   seed?: Uint8Array | number,
-  randFn = randomBytes
+  randFn: typeof randomBytes = randomBytes
 ): DSAProvableParams {
   if (typeof hash !== 'function') throw new Error('wrong hash');
   const res = genDSAPrimes(L, N, hash, seed, randFn);
@@ -339,7 +340,7 @@ export const DSA = (params: DSAParams) => {
   };
 };
 
-export const _TEST = {
+export const _TEST: any = {
   genDSAPrimes,
   genDSAGenerator,
 };

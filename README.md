@@ -14,7 +14,7 @@ Minimal implementation of older cryptography algorithms: RSA, DSA, DH.
 
 ## Usage
 
-> npm install micro-rsa-dsa-dh
+> `npm install micro-rsa-dsa-dh`
 
 We support all major platforms and runtimes.
 
@@ -22,9 +22,9 @@ A standalone file [micro-rsa-dsa-dh.js](https://github.com/paulmillr/micro-rsa-d
 
 - [All imports](#all-imports)
 - [RSA](#rsa)
-    - [OAEP](#oaep)
-    - [PSS](#pss)
-    - [PKCS1](#pkcs1)
+  - [OAEP](#oaep)
+  - [PSS](#pss)
+  - [PKCS1](#pkcs1)
 - [DSA](#dsa)
 - [DH](#dh)
 - [ElGamal](#elgamal)
@@ -148,10 +148,7 @@ const alicePub = dh.getPublicKey(alicePriv);
 const bobPriv = dh.randomPrivateKey();
 const bobPub = dh.getPublicKey(bobPriv);
 
-deepStrictEqual(
-  dh.getSharedSecret(alicePriv, bobPub),
-  dh.getSharedSecret(bobPriv, alicePub)
-);
+deepStrictEqual(dh.getSharedSecret(alicePriv, bobPub), dh.getSharedSecret(bobPriv, alicePub));
 ```
 
 ## DSA
@@ -230,15 +227,15 @@ deepStrictEqual(primality.isProbablySafePrime(7n, 10), true);
 ```
 
 |                     | Reliable | Deterministic | Note                                                                                                                                                                      |
-|---------------------|----------|---------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ------------------- | -------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | millerRabin         | No       | No            | Non-deterministic Miller-Rabin test over random bases (multiple iterations).                                                                                              |
 | lucas               | No       | Yes           | Deterministic Lucas test. Generally slower than the Miller-Rabin test but can be more reliable for certain numbers.                                                       |
 | bailliePSW          | Yes      | Yes           | Deterministic test which consists of Miller-Rabin with base 2 and Lucas test. Suitable for critical applications where the highest reliability is required.               |
 | isProbablePrime     | Yes      | No            | Non-deterministic test from FIPS186-5. This is an enhanced version of the Baillie-PSW test, incorporating multiple rounds of the Miller-Rabin test with random bases      |
-| isProbablySafePrime | Yes       | No            | Non-deterministic safe prime test. Slow. Tests if a number is a probable safe prime. A safe prime is a prime number of the form p = 2q + 1, where both p and q are prime. |
+| isProbablySafePrime | Yes      | No            | Non-deterministic safe prime test. Slow. Tests if a number is a probable safe prime. A safe prime is a prime number of the form p = 2q + 1, where both p and q are prime. |
 
-* *Reliable:* no false positives are known
-* *Deterministic:* it does not rely on randomness
+- _Reliable:_ no false positives are known
+- _Deterministic:_ it does not rely on randomness
 
 ## Security
 

@@ -36,6 +36,19 @@ describe('DH', () => {
       'modp17',
       'modp18',
     ]) {
+      // Deno DH is broken:
+      // Different groups, if we provide correct group prime/generator it will break anyway
+      // node
+      // GROUP modp14 {
+      //   p: 'ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece45b3dc2007cb8a163bf0598da48361c55d39a69163fa8fd24cf5f83655d23dca3ad961c62f356208552bb9ed529077096966d670c354e4abc9804f1746c08ca18217c32905e462e36ce3be39e772c180e86039b2783a2ec07a28fb5c55df06f4c52c9de2bcbf6955817183995497cea956ae515d2261898fa051015728e5a8aacaa68ffffffffffffffff',
+      //   g: '02'
+      // }
+      // deno
+      // GROUP modp14 {
+      //   p: "ffffa2348bd10874a62279ddb31b6d376d4576c6e96bb6edfba511e6513db805369aa85f239656bb076d4e04087c463b2c03a28ff0c9f6187ce518105a68ffff",
+      //   g: "00000002"
+      // }
+
       // {
       //   const dhg = crypto.createDiffieHellmanGroup(group);
       //   console.log('GROUP', group, {
@@ -49,6 +62,7 @@ describe('DH', () => {
       const bobNoble = nobleDH.randomPrivateKey();
       // Example usage
       const aliceDH = getNodeDH(aliceNoble, group);
+      console.log('DH', aliceDH);
       const bobDH = getNodeDH(bobNoble, group);
       deepStrictEqual(nobleDH.getPublicKey(aliceNoble), aliceDH.pub);
       deepStrictEqual(nobleDH.getPublicKey(bobNoble), bobDH.pub);

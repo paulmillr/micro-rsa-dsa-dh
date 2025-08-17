@@ -1,6 +1,6 @@
+import { describe, should } from 'micro-should';
 import { deepStrictEqual } from 'node:assert';
-import { should, describe } from 'micro-should';
-import * as elg from '../esm/elgamal.js';
+import * as elg from '../src/elgamal.ts';
 
 // Tests from 'https://github.com/Legrandin/pycryptodome/blob/master/lib/Crypto/SelfTest/PublicKey/test_ElGamal.py'
 // There is no real test vectors, nobody uses it.

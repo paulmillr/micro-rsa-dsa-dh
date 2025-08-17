@@ -1,9 +1,9 @@
-import { sha256 } from '@noble/hashes/sha256';
-import { deepStrictEqual, throws } from 'node:assert';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { describe, should } from 'micro-should';
+import { deepStrictEqual, throws } from 'node:assert';
 import * as fs from 'node:fs';
-import * as rsa from '../esm/rsa.js';
-import { bytesToHex, HASHES, hexToBytes, jsonGZ } from './utils.js';
+import * as rsa from '../src/rsa.ts';
+import { bytesToHex, HASHES, hexToBytes, jsonGZ } from './utils.ts';
 
 function parseRSADPComponent(filePath) {
   const data = fs.readFileSync(filePath, 'utf-8');

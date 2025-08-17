@@ -1,9 +1,9 @@
+import { describe, should } from 'micro-should';
 import { deepStrictEqual } from 'node:assert';
-import { should, describe } from 'micro-should';
-import * as primality from '../esm/primality.js';
-import { sqrt, gcd } from '../esm/utils.js';
-import { IFCPrimes } from '../esm/rsa.js';
-import { jsonGZ, parseTestFile } from './utils.js';
+import * as primality from '../src/primality.ts';
+import { IFCPrimes } from '../src/rsa.ts';
+import { gcd, sqrt } from '../src/utils.ts';
+import { jsonGZ, parseTestFile } from './utils.ts';
 
 describe('primality', () => {
   const { millerRabinBaseTest, jacobi } = primality;

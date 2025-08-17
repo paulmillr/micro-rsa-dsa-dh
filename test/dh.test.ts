@@ -1,7 +1,7 @@
+import { describe, should } from 'micro-should';
 import { deepStrictEqual } from 'node:assert';
-import { should, describe } from 'micro-should';
-import { DH } from '../esm/dh.js';
 import * as crypto from 'node:crypto';
+import { DH } from '../src/dh.ts';
 
 describe('DH', () => {
   should('Example', () => {

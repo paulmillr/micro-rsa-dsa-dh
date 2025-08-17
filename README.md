@@ -8,6 +8,7 @@ Minimal implementation of older cryptography algorithms: RSA, DSA, DH.
 - 🤝 DH (Diffie-Hellman) key exchange
 - 📦 ElGamal encryption
 - 5️⃣ Primality tests
+- 🪶 16KB (gzipped)
 
 > [!WARNING]
 > Like in all JS implementations, keep in mind [timing leaks](#security)

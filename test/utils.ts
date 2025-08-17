@@ -1,12 +1,11 @@
+import { sha1 } from '@noble/hashes/legacy.js';
+import { sha224, sha256, sha384, sha512, sha512_224, sha512_256 } from '@noble/hashes/sha2.js';
+import { sha3_224, sha3_256, sha3_384, sha3_512, shake128, shake256 } from '@noble/hashes/sha3.js';
 import * as fs from 'node:fs';
-import * as zlib from 'node:zlib';
 import { dirname, join as pathjoin } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sha1 } from '@noble/hashes/sha1';
-import { sha256, sha224 } from '@noble/hashes/sha256';
-import { sha384, sha512, sha512_256, sha512_224 } from '@noble/hashes/sha512';
-import { sha3_224, sha3_256, sha3_384, sha3_512, shake128, shake256 } from '@noble/hashes/sha3';
-export { bytesToHex, hexToBytes } from '@noble/hashes/utils';
+import * as zlib from 'node:zlib';
+export { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

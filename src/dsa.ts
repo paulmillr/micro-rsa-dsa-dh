@@ -1,6 +1,6 @@
-import { hmac } from '@noble/hashes/hmac';
-import { concatBytes, hexToBytes, isBytes, randomBytes } from '@noble/hashes/utils';
-import { isProbablePrime } from './primality.js';
+import { hmac } from '@noble/hashes/hmac.js';
+import { concatBytes, hexToBytes, isBytes, randomBytes } from '@noble/hashes/utils.js';
+import { isProbablePrime } from './primality.ts';
 import {
   bytesToNumber,
   getFieldBytesLength,
@@ -14,7 +14,7 @@ import {
   OS2IP,
   pow,
   type RandFn,
-} from './utils.js';
+} from './utils.ts';
 
 export class DERErr extends Error {
   constructor(m = '') {
@@ -224,27 +224,31 @@ export function createHmacDrbg<T>(
   if (typeof hashLen !== 'number' || hashLen < 2) throw new Error('hashLen must be a number');
   if (typeof qByteLen !== 'number' || qByteLen < 2) throw new Error('qByteLen must be a number');
   if (typeof hmacFn !== 'function') throw new Error('hmacFn must be a function');
+  const NULL = Uint8Array.of();
+  const byte0 = Uint8Array.of(0);
+  const byte1 = Uint8Array.of(1);
+  const maxDrbgIters = 1000;
   // Step B, Step C: set hashLen to 8*ceil(hlen/8)
-  let v = new Uint8Array(hashLen); // Minimal non-full-spec HMAC-DRBG from NIST 800-90 for RFC6979 sigs.
-  let k = new Uint8Array(hashLen); // Steps B and C of RFC6979 3.2: set hashLen, in our case always same
+  let v: Uint8Array = new Uint8Array(hashLen); // Minimal non-full-spec HMAC-DRBG from NIST 800-90 for RFC6979 sigs.
+  let k: Uint8Array = new Uint8Array(hashLen); // Steps B and C of RFC6979 3.2: set hashLen, in our case always same
   let i = 0; // Iterations counter, will throw when over 1000
   const reset = () => {
     v.fill(1);
     k.fill(0);
     i = 0;
   };
-  const h = (...b: Uint8Array[]) => hmacFn(k, v, ...b); // hmac(k)(v, ...values)
-  const reseed = (seed = new Uint8Array()) => {
+  const h = (...b: Uint8Array[]): Uint8Array => hmacFn(k, v, ...b); // hmac(k)(v, ...values)
+  const reseed = (seed: Uint8Array = NULL) => {
     // HMAC-DRBG reseed() function. Steps D-G
-    k = h(new Uint8Array([0x00]), seed); // k = hmac(k || v || 0x00 || seed)
+    k = h(byte0, seed); // k = hmac(k || v || 0x00 || seed)
     v = h(); // v = hmac(k || v)
     if (seed.length === 0) return;
-    k = h(new Uint8Array([0x01]), seed); // k = hmac(k || v || 0x01 || seed)
+    k = h(byte1, seed); // k = hmac(k || v || 0x01 || seed)
     v = h(); // v = hmac(k || v)
   };
   const gen = () => {
     // HMAC-DRBG generate() function
-    if (i++ >= 1000) throw new Error('drbg: tried 1000 values');
+    if (i++ >= maxDrbgIters) throw new Error('drbg: tried max iterations');
     let len = 0;
     const out: Uint8Array[] = [];
     while (len < qByteLen) {

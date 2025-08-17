@@ -1,9 +1,8 @@
-import { sha1 } from '@noble/hashes/sha1';
-import { sha224, sha256 } from '@noble/hashes/sha256';
-import { sha3_224, sha3_256, sha3_384, sha3_512, shake128, shake256 } from '@noble/hashes/sha3';
-import { sha384, sha512, sha512_224, sha512_256 } from '@noble/hashes/sha512';
-import { concatBytes, createView, hexToBytes, randomBytes } from '@noble/hashes/utils';
-import { isProbablePrimeRSA } from './primality.js';
+import { sha1 } from '@noble/hashes/legacy.js';
+import { sha224, sha256, sha384, sha512, sha512_224, sha512_256 } from '@noble/hashes/sha2.js';
+import { sha3_224, sha3_256, sha3_384, sha3_512, shake128, shake256 } from '@noble/hashes/sha3.js';
+import { concatBytes, createView, hexToBytes, randomBytes } from '@noble/hashes/utils.js';
+import { isProbablePrimeRSA } from './primality.ts';
 import {
   type Hash,
   I2OSP,
@@ -15,7 +14,7 @@ import {
   pow,
   randomBits,
   sqrt,
-} from './utils.js';
+} from './utils.ts';
 
 export type VarLenHash = (msg: Uint8Array, opts: { dkLen: number }) => Uint8Array; // can be mgf(sha256)
 
@@ -65,7 +64,8 @@ export function IFCPrimes(
   for (let i = 0; i < 5 * nlen; i++) {
     // Step 4.1 and Step 4.7
     let p = randomBits(nlen / 2); // Step 4.2
-    if (a !== undefined) p += BigInt((a - Number(p % 8n)) % 8); // Step 4.3
+    if (a !== undefined)
+      p += BigInt((a - Number(p % 8n)) % 8); // Step 4.3
     else if (p % 2n === 0n) p += 1n; // Step 4.3
     if (p < limit) continue; // Step 4.4
     if (gcd(p - 1n, e) === 1n) {
@@ -75,7 +75,8 @@ export function IFCPrimes(
         // Proceed to Step 5 if p is probably prime
         for (let j = 0; j < 10 * nlen; j++) {
           let q = randomBits(nlen / 2); // Step 5.2
-          if (b !== undefined) q += BigInt((b - Number(q % 8n)) % 8); // Step 5.3
+          if (b !== undefined)
+            q += BigInt((b - Number(q % 8n)) % 8); // Step 5.3
           else if (q % 2n === 0n) q += 1n; // Step 5.3
           if (q < limit) continue; // Step 5.4
           let distance = p - q;
@@ -248,7 +249,7 @@ export function keygen(
 export const OAEP = (
   hash: Hash,
   mgfHash: VarLenHash,
-  label: Uint8Array = new Uint8Array()
+  label: Uint8Array = Uint8Array.of()
 ): KEM => ({
   encrypt(publicKey: PublicKey, M: Uint8Array): Uint8Array {
     validatePublicKey(publicKey);
@@ -315,7 +316,7 @@ function EMSA_PSS_ENCODE(M: Uint8Array, emBits: number, opts: PSSOpts): Uint8Arr
   const emLen = Math.ceil(emBits / 8);
   const mHash = hash(M); // Step 2
   if (emLen < hash.outputLen + sLen + 2) throw new Error('encoding error'); // Step 3
-  const salt = sLen === 0 ? new Uint8Array() : randomBytes(sLen); // Step 4
+  const salt = sLen === 0 ? Uint8Array.of() : randomBytes(sLen); // Step 4
   // Step 5: Let M' = (0x)00 00 00 00 00 00 00 00 || mHash || salt
   const Mprime = concatBytes(new Uint8Array(8), mHash, salt); // Step 5
   const H = hash(Mprime); // Step 6

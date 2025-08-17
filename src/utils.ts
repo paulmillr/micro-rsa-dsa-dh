@@ -1,5 +1,5 @@
 /*! micro-rsa-dsa-dh - MIT License (c) 2024 Paul Miller (paulmillr.com) */
-import { bytesToHex, hexToBytes, randomBytes } from '@noble/hashes/utils';
+import { bytesToHex, hexToBytes, randomBytes } from '@noble/hashes/utils.js';
 
 /**
  * Secure PRNG function like 'randomBytes' from '@noble/hashes/utils'

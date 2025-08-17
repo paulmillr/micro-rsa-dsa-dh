@@ -1,6 +1,6 @@
-import { randomBytes } from '@noble/hashes/utils';
-import { isProbablySafePrime } from './primality.js';
-import { bytesToNumber, gcd, invert, mod, pow } from './utils.js';
+import { randomBytes } from '@noble/hashes/utils.js';
+import { isProbablySafePrime } from './primality.ts';
+import { bytesToNumber, gcd, invert, mod, pow } from './utils.ts';
 
 /**
  * Returns random number in range [min, max)

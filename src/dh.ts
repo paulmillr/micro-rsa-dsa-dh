@@ -1,4 +1,4 @@
-import { randomBytes } from '@noble/hashes/utils';
+import { randomBytes } from '@noble/hashes/utils.js';
 import {
   bytesToNumber,
   ensureBytes,
@@ -7,7 +7,7 @@ import {
   mapHashToField,
   numberToBytes,
   pow,
-} from './utils.js';
+} from './utils.ts';
 
 export type DHGroup = {
   p: bigint; // Group

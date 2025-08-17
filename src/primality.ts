@@ -1,5 +1,5 @@
-import { randomBytes } from '@noble/hashes/utils';
-import { gcd, mod, numberToBytes, pow, type RandFn, randomBits } from './utils.js';
+import { randomBytes } from '@noble/hashes/utils.js';
+import { gcd, mod, numberToBytes, pow, type RandFn, randomBits } from './utils.ts';
 
 // Non-deterministic Miller-Rabin test over random bases (multiple iterations).
 // This test is probabilistic and may produce false positives (pseudoprimes).

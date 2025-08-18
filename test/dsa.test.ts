@@ -1,5 +1,5 @@
 import { sha256 } from '@noble/hashes/sha2.js';
-import { describe, should } from 'micro-should';
+import { describe, should } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual } from 'node:assert';
 import * as dsa from '../src/dsa.ts';
 import { bytesToHex, HASHES, hexToBytes, jsonGZ, parseTestFile } from './utils.ts';

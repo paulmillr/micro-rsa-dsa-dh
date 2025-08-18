@@ -1,4 +1,4 @@
-import { describe, should } from 'micro-should';
+import { describe, should } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual } from 'node:assert';
 import * as primality from '../src/primality.ts';
 import { IFCPrimes } from '../src/rsa.ts';

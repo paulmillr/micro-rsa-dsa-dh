@@ -2,11 +2,12 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { describe, should } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual, throws } from 'node:assert';
 import * as fs from 'node:fs';
+import { join as pathjoin } from 'node:path';
 import * as rsa from '../src/rsa.ts';
-import { bytesToHex, HASHES, hexToBytes, jsonGZ } from './utils.ts';
+import { __dirname, bytesToHex, HASHES, hexToBytes, jsonGZ } from './utils.ts';
 
 function parseRSADPComponent(filePath) {
-  const data = fs.readFileSync(filePath, 'utf-8');
+  const data = fs.readFileSync(pathjoin(__dirname, filePath), 'utf-8');
   const lines = data.split('\n').map((line) => line.trim());
   const tests = [];
   let curTest;
@@ -52,7 +53,7 @@ const OAEP = [
   'rsa_three_primes_oaep_2048_sha1_mgf1sha1_test.json.gz',
   'rsa_three_primes_oaep_3072_sha224_mgf1sha224_test.json.gz',
   'rsa_three_primes_oaep_4096_sha256_mgf1sha256_test.json.gz',
-].map((i) => jsonGZ(`wycheproof/${i}`));
+].map((i) => jsonGZ(`vectors/wycheproof/${i}`));
 
 const PSS = [
   'rsa_pss_2048_sha1_mgf1_20_params_test.json.gz',
@@ -85,7 +86,7 @@ const PSS = [
   'rsa_pss_4096_shake256_test.json.gz',
   'rsa_pss_misc_params_test.json.gz',
   'rsa_pss_misc_test.json.gz',
-].map((i) => jsonGZ(`wycheproof/${i}`));
+].map((i) => jsonGZ(`vectors/wycheproof/${i}`));
 
 const PKCS1 = [
   'rsa_signature_2048_sha224_test.json.gz',
@@ -112,13 +113,13 @@ const PKCS1 = [
   'rsa_signature_8192_sha256_test.json.gz',
   'rsa_signature_8192_sha384_test.json.gz',
   'rsa_signature_8192_sha512_test.json.gz',
-].map((i) => jsonGZ(`wycheproof/${i}`));
+].map((i) => jsonGZ(`vectors/wycheproof/${i}`));
 
 const PKCS1_ENCR = [
   'rsa_pkcs1_2048_test.json.gz',
   'rsa_pkcs1_3072_test.json.gz',
   'rsa_pkcs1_4096_test.json.gz',
-].map((i) => jsonGZ(`wycheproof/${i}`));
+].map((i) => jsonGZ(`vectors/wycheproof/${i}`));
 
 const privKeys = {};
 for (const t of OAEP) {
@@ -178,7 +179,7 @@ describe('RSA', () => {
   });
 
   describe('RSADP Tests', () => {
-    const parsed = parseRSADPComponent('./test/RSADPtestvectors/RSADPComponent800_56B.txt');
+    const parsed = parseRSADPComponent('vectors/RSADPtestvectors/RSADPComponent800_56B.txt');
     for (const m of parsed) {
       for (const t of m.tests) {
         should(`${m.mod}/${t.COUNT}`, () => {
@@ -204,7 +205,7 @@ describe('RSA', () => {
     }
   });
   describe('RSA2SP1', () => {
-    const parsed = parseRSADPComponent('./test/RSA2SP1testvectors/RSASP1.fax');
+    const parsed = parseRSADPComponent('vectors/RSA2SP1testvectors/RSASP1.fax');
     for (const m of parsed) {
       for (const t of m.tests) {
         should(`${m.mod}/${t.COUNT}`, () => {

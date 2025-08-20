@@ -17,6 +17,8 @@ Minimal implementation of older cryptography algorithms: RSA, DSA, DH.
 
 > `npm install micro-rsa-dsa-dh`
 
+> `deno add jsr:@paulmillr/micro-rsa-dsa-dh`
+
 We support all major platforms and runtimes.
 
 A standalone file [micro-rsa-dsa-dh.js](https://github.com/paulmillr/micro-rsa-dsa-dh/releases) is also available.
@@ -82,7 +84,7 @@ Use if you need KEM (encrypt/decrypt).
 
 ```ts
 import * as rsa from 'micro-rsa-dsa-dh/rsa.js';
-import { sha256 } from '@noble/hashes/sha2';
+import { sha256 } from '@noble/hashes/sha2.js';
 const alice = rsa.keygen(2048);
 const oaep = rsa.OAEP(sha256, rsa.mgf1(sha256));
 const msg = new Uint8Array([1, 2, 3]);
@@ -96,7 +98,7 @@ Use if you need signatures (sign/verify).
 
 ```ts
 import * as rsa from 'micro-rsa-dsa-dh/rsa.js';
-import { sha256 } from '@noble/hashes/sha2';
+import { sha256 } from '@noble/hashes/sha2.js';
 const alice = rsa.keygen(2048);
 const pss = rsa.PSS(sha256, rsa.mgf1(sha256));
 const msg = new Uint8Array([1, 2, 3]);
@@ -166,7 +168,7 @@ Same as ECDSA, but with big numbers. Cons:
 
 ```ts
 import * as dsa from 'micro-rsa-dsa-dh/dsa.js';
-import { sha256 } from '@noble/hashes/sha2';
+import { sha256 } from '@noble/hashes/sha2.js';
 // 1. Params
 // Carol generates random params
 const carolParams = dsa.genDSAParams(2048, 256, sha256, 1);

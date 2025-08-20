@@ -8,7 +8,7 @@ import * as zlib from 'node:zlib';
 export { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+export const __dirname = dirname(__filename);
 
 export const jsonGZ = (path) => {
   const data = fs.readFileSync(pathjoin(__dirname, path));
@@ -34,7 +34,7 @@ export const HASHES = {
 // TODO: unify with component parser
 // This is generic parser, but component uses line separator inside tests
 export function parseTestFile(filePath) {
-  const data = fs.readFileSync(filePath, 'utf-8');
+  const data = fs.readFileSync(pathjoin(__dirname, filePath), 'utf-8');
   const lines = data.split('\n').map((line) => line.trim());
   const groups = [];
   let curGroup = { tests: [] };

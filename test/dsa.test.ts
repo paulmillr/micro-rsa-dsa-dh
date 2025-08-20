@@ -13,7 +13,7 @@ const DSA_VECTORS = [
   'dsa_2048_256_sha256_test.json',
   'dsa_3072_256_sha256_p1363_test.json',
   'dsa_3072_256_sha256_test.json',
-].map((i) => jsonGZ(`wycheproof/${i}`));
+].map((i) => jsonGZ(`vectors/wycheproof/${i}`));
 
 describe('DSA', () => {
   should('Example', () => {
@@ -45,7 +45,7 @@ describe('DSA', () => {
   describe('getParams', () => {
     const { genDSAPrimes, genDSAGenerator } = dsa._TEST;
     should('FIPS186-4: genPQ', () => {
-      for (const tg of parseTestFile('test/186-3dsatestvectors/PQGGen.rsp')) {
+      for (const tg of parseTestFile('vectors/186-3dsatestvectors/PQGGen.rsp')) {
         if ('A.1.2.1 Construction of the Primes p and q Using the Shawe-Taylor Algorithm' in tg)
           break;
         const [ns, ls, h] = tg.mod.split(',').map((i) => i.trim());
@@ -63,7 +63,7 @@ describe('DSA', () => {
     });
     should('FIPS186-4: genG', () => {
       let found = false;
-      for (const tg of parseTestFile('test/186-3dsatestvectors/PQGGen.rsp')) {
+      for (const tg of parseTestFile('vectors/186-3dsatestvectors/PQGGen.rsp')) {
         // I hope one day they will make it machine readable.
         if ('A.2.3   Verifiable Canonical Generation of the Generator g' in tg) found = true;
         if (!found) continue;

@@ -90,7 +90,7 @@ describe('primality', () => {
     deepStrictEqual(jacobi(5n, 3439601197n), -1);
   });
   should('Primes', () => {
-    const vectors = jsonGZ('./wycheproof/primality_test.json.gz');
+    const vectors = jsonGZ('./vectors/wycheproof/primality_test.json.gz');
     for (const tg of vectors.testGroups) {
       for (const t of tg.tests) {
         const val = BigInt(`0x${t.value}`);
@@ -192,7 +192,7 @@ describe('primality', () => {
 
   should('Probable primes (FIPS186-3)', () => {
     const parsed = parseTestFile(
-      './test/186-3rsatestvectors/KeyGen_186-3_RandomProbablyPrime3_3_KAT.txt'
+      'vectors/186-3rsatestvectors/KeyGen_186-3_RandomProbablyPrime3_3_KAT.txt'
     );
     for (const tg of parsed) {
       for (const t of tg.tests) {

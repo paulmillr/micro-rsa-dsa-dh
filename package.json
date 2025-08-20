@@ -1,16 +1,15 @@
 {
   "name": "micro-rsa-dsa-dh",
   "version": "0.2.0",
-  "description": "Minimal implementation of older cryptography algorithms: RSA, DSA, DH",
+  "description": "Minimal implementation of older cryptography algorithms: RSA, DSA, DH, ElGamal",
   "files": [
     "*.js",
     "*.d.ts",
     "*.map",
-    "esm",
     "src"
   ],
   "dependencies": {
-    "@noble/hashes": "2.0.0-beta.4"
+    "@noble/hashes": "^2.0.0-beta.5"
   },
   "devDependencies": {
     "@paulmillr/jsbt": "0.4.3",

@@ -1,0 +1,10 @@
+{
+  "name": "build",
+  "private": true,
+  "version": "1.0.0",
+  "main": "input.js",
+  "type": "module",
+  "devDependencies": {
+    "esbuild": "0.25.9"
+  }
+}

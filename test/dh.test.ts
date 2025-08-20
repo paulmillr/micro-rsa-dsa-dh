@@ -17,6 +17,7 @@ describe('DH', () => {
   });
 
   should('Basic', () => {
+    if (process.versions.deno || process.versions.bun) return;
     const getNodeDH = (privateKey, group) => {
       const dhg = crypto.createDiffieHellmanGroup(group);
       const dh = crypto.createDiffieHellman(dhg.getPrime(), dhg.getGenerator());

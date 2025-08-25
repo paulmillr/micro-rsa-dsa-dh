@@ -1,6 +1,6 @@
 {
   "name": "@paulmillr/micro-rsa-dsa-dh",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "exports": {
     ".": "./src/index.ts",
     "./dh.js": "./src/dh.ts",
@@ -11,7 +11,7 @@
     "./utils.js": "./src/utils.ts"
   },
   "imports": {
-    "@noble/hashes": "jsr:@noble/hashes@^2.0.0-beta.5"
+    "@noble/hashes": "jsr:@noble/hashes@^2.0.0"
   },
   "publish": {
     "include": [

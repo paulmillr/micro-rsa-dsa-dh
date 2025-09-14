@@ -25,6 +25,15 @@
     "test:deno": "deno --allow-env --allow-read test/index.ts",
     "test:node20": "cd test; npx tsc; node compiled/test/index.js"
   },
+  "exports": {
+    ".": "./index.js",
+    "./dh.js": "./dh.js",
+    "./dsa.js": "./dsa.js",
+    "./elgamal.js": "./elgamal.js",
+    "./primality.js": "./primality.js",
+    "./rsa.js": "./rsa.js",
+    "./utils.js": "./utils.js"
+  },
   "keywords": [
     "rsa",
     "dsa",

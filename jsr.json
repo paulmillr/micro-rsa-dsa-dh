@@ -21,5 +21,6 @@
       "README.md"
     ]
   },
+  "allowSlowTypes": true,
   "license": "MIT"
 }

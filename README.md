@@ -253,14 +253,14 @@ For comparison, bigint-based elliptic curve implementations will leak much less 
 
 ## Links
 
-- https://datatracker.ietf.org/doc/html/rfc3447 - old RSA
-- https://datatracker.ietf.org/doc/html/rfc8017 - OAEP/PSS/PKCS1
-- https://datatracker.ietf.org/doc/html/rfc8702 - RSA-PSS + Shake
+- [RFC 3447](https://datatracker.ietf.org/doc/html/rfc3447) - old RSA
+- [RFC 8017](https://datatracker.ietf.org/doc/html/rfc8017) - OAEP/PSS/PKCS1
+- [RFC 8702](https://datatracker.ietf.org/doc/html/rfc8702) - RSA-PSS + Shake
 - https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.186-5.pdf - Prime generation
 - https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.186-4.pdf - DSA
-- https://datatracker.ietf.org/doc/html/rfc2631 - DH
-- https://datatracker.ietf.org/doc/html/rfc3526 - DH groups
-- https://datatracker.ietf.org/doc/html/rfc6979 - DSA
+- [RFC 2631](https://datatracker.ietf.org/doc/html/rfc2631) - DH
+- [RFC 3526](https://datatracker.ietf.org/doc/html/rfc3526) - DH groups
+- [RFC 6979](https://datatracker.ietf.org/doc/html/rfc6979) - DSA
 
 ## License
 

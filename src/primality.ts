@@ -29,9 +29,17 @@ import { gcd, mod, numberToBytes, pow, type RandFn, randomBits } from './utils.t
 
 /**
  * Function to perform the Miller-Rabin primality test
- * @param w The odd integer to be tested for primality. This will be either p or q, or one of the auxiliary primes.
- * @param iterations The number of iterations of the test to be performed
- * @returns true for 'PROBABLY PRIME' and false for 'COMPOSITE'
+ * @param w - Odd integer to test for probable primality.
+ * @param iterations - Number of random-base rounds to execute.
+ * @param randFn - Random-byte generator used to choose Miller-Rabin bases.
+ * @returns `true` when the candidate passes every round, `false` for a composite witness.
+ * @throws If the candidate, iteration count, or random-byte generator is invalid. {@link Error}
+ * @example
+ * 23 is prime, so Miller-Rabin accepts it for any random base.
+ * ```ts
+ * import { millerRabin } from 'micro-rsa-dsa-dh/primality.js';
+ * millerRabin(23n, 3);
+ * ```
  */
 export function millerRabin(w: bigint, iterations: number, randFn: RandFn = randomBytes): boolean {
   if (typeof w !== 'bigint') throw new Error('number expected to be bigint');
@@ -65,7 +73,19 @@ export function millerRabin(w: bigint, iterations: number, randFn: RandFn = rand
   return true;
 }
 
-// Deterministic version of Miller-Rabin test with fixed base
+/**
+ * Deterministic Miller-Rabin check for a single fixed base.
+ * @param w - Odd integer to test for probable primality.
+ * @param base - Miller-Rabin base to evaluate against `w`.
+ * @returns `true` when `w` passes the selected base test.
+ * @throws If the candidate is invalid or an internal Miller-Rabin invariant fails. {@link Error}
+ * @example
+ * Run a single deterministic Miller-Rabin round with base 2.
+ * ```ts
+ * import { millerRabinBaseTest } from 'micro-rsa-dsa-dh/primality.js';
+ * millerRabinBaseTest(23n, 2n);
+ * ```
+ */
 export function millerRabinBaseTest(w: bigint, base: bigint): boolean {
   return millerRabin(w, 1, (len) => numberToBytes(base, len));
 }
@@ -93,9 +113,15 @@ function isPerfectSquare(C: bigint): boolean {
 
 /**
  * This routine computes the Jacobi symbol. From FIPS186-5 (B.5 JACOBI SYMBOL ALGORITHM)
- * @param a initial value is in the sequence {5, –7, 9, –11, 13, –15, 17, ...}
- * @param n initial value is the candidate being tested
- * @returns Jacobi symbol
+ * @param a - Value from the Lucas parameter search sequence.
+ * @param n - Candidate integer being tested.
+ * @returns Jacobi symbol for `(a / n)`.
+ * @example
+ * Jacobi symbols are used while selecting Lucas parameters.
+ * ```ts
+ * import { jacobi } from 'micro-rsa-dsa-dh/primality.js';
+ * jacobi(5n, 11n);
+ * ```
  */
 export function jacobi(a: bigint, n: bigint): number {
   a = mod(a, n); // Step 1
@@ -122,8 +148,15 @@ export function jacobi(a: bigint, n: bigint): number {
 
 /**
  * (General) Lucas Probabilistic Primality Test (From FIPS186-5)
- * @param C positive integer
- * @returns true if number is probably prime, false if composite
+ * @param C - Positive integer candidate.
+ * @returns `true` when the Lucas test accepts the candidate.
+ * @throws If the candidate is not a bigint or an internal Lucas invariant fails. {@link Error}
+ * @example
+ * Lucas complements Miller-Rabin in the Baillie-PSW test.
+ * ```ts
+ * import { lucas } from 'micro-rsa-dsa-dh/primality.js';
+ * lucas(29n);
+ * ```
  */
 export function lucas(C: bigint): boolean {
   if (typeof C !== 'bigint') throw new Error('number expected to be bigint');
@@ -184,10 +217,15 @@ function checkSieve(n: bigint) {
 
 /**
  * Baillie–PSW primality test
- * @param n number to check if prime
- * @param iters iterations of Miler-Rabin tests
- * @param randFn
- * @returns true if probable prime
+ * @param n - Number to test for primality.
+ * @returns `true` when the candidate passes Miller-Rabin base 2 and Lucas checks.
+ * @throws If the candidate is invalid or an internal primality-test invariant fails. {@link Error}
+ * @example
+ * Baillie-PSW combines Miller-Rabin base 2 with Lucas.
+ * ```ts
+ * import { bailliePSW } from 'micro-rsa-dsa-dh/primality.js';
+ * bailliePSW(29n);
+ * ```
  */
 export function bailliePSW(n: bigint): boolean {
   const sieveRes = checkSieve(n);
@@ -204,6 +242,15 @@ export function bailliePSW(n: bigint): boolean {
  * - multiple rounds of Miller-Rabin tests (with different bases)
  * @param n - number to test
  * @param iters - iteration count (how much random bases to test)
+ * @param randFn - Random-byte generator used to choose Miller-Rabin bases.
+ * @returns `true` when the candidate passes every selected primality check.
+ * @throws If the candidate, iteration count, or random-byte generator is invalid. {@link Error}
+ * @example
+ * FIPS 186 prime checks add random Miller-Rabin rounds before Lucas.
+ * ```ts
+ * import { isProbablePrime } from 'micro-rsa-dsa-dh/primality.js';
+ * isProbablePrime(29n, 3);
+ * ```
  */
 export function isProbablePrime(n: bigint, iters: number, randFn: RandFn = randomBytes): boolean {
   const sieveRes = checkSieve(n);
@@ -212,6 +259,19 @@ export function isProbablePrime(n: bigint, iters: number, randFn: RandFn = rando
   return lucas(n);
 }
 
+/**
+ * RSA-tuned probable-prime check using FIPS 186 iteration counts.
+ * @param n - Candidate integer to test.
+ * @param randFn - Random-byte generator used by the Miller-Rabin rounds.
+ * @returns `true` when the candidate passes the RSA-oriented probable-prime checks.
+ * @throws If the candidate or random-byte generator is invalid. {@link Error}
+ * @example
+ * RSA key generation uses the iteration counts from FIPS 186.
+ * ```ts
+ * import { isProbablePrimeRSA } from 'micro-rsa-dsa-dh/primality.js';
+ * isProbablePrimeRSA(65537n);
+ * ```
+ */
 export function isProbablePrimeRSA(n: bigint, randFn: RandFn = randomBytes): boolean {
   // - https://crypto.stackexchange.com/questions/104265/iteration-count-for-enhanced-miller-rabin
   // - https://github.com/openssl/openssl/blob/master/crypto/bn/bn_rsa_fips186_4.c
@@ -229,7 +289,14 @@ export function isProbablePrimeRSA(n: bigint, randFn: RandFn = randomBytes): boo
  * @param p - number to test
  * @param iters - iteration count (how much random bases to test)
  * @param randFn - function to generate random bytes
- * @returns true if p is a probable safe prime, false otherwise
+ * @returns `true` when both `p` and `(p - 1) / 2` pass the probable-prime checks.
+ * @throws If the candidate, iteration count, or random-byte generator is invalid. {@link Error}
+ * @example
+ * Safe primes are needed by DH and ElGamal-style groups.
+ * ```ts
+ * import { isProbablySafePrime } from 'micro-rsa-dsa-dh/primality.js';
+ * isProbablySafePrime(23n, 3);
+ * ```
  */
 export function isProbablySafePrime(
   p: bigint,

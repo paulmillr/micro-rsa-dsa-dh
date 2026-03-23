@@ -16,6 +16,15 @@ describe('DH', () => {
     );
   });
 
+  should('pads public keys to fixed group length', () => {
+    const nobleDH = DH('modp18');
+    const privateKey = new Uint8Array(1024);
+    privateKey[1023] = 1;
+    const publicKey = nobleDH.getPublicKey(privateKey);
+    deepStrictEqual(publicKey.length, 1024);
+    deepStrictEqual(nobleDH.getSharedSecret(privateKey, publicKey).length, 1024);
+  });
+
   should('Basic', () => {
     if (process.versions.deno || process.versions.bun) return;
     const getNodeDH = (privateKey, group) => {

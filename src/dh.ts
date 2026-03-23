@@ -9,11 +9,26 @@ import {
   pow,
 } from './utils.ts';
 
+/** Classic finite-field Diffie-Hellman group parameters. */
 export type DHGroup = {
-  p: bigint; // Group
-  g: bigint; // Generator
+  /** Finite-field prime modulus for the DH group. */
+  p: bigint;
+  /** Generator for the chosen subgroup. */
+  g: bigint;
 };
 
+/**
+ * Built-in MODP groups keyed by their short names.
+ * @example
+ * Pick one of the built-in MODP groups before deriving keys.
+ * ```ts
+ * import { DH, DHGroups } from 'micro-rsa-dsa-dh/dh.js';
+ * const group = DHGroups.modp14;
+ * const dh = DH(group);
+ * const privateKey = dh.randomPrivateKey();
+ * privateKey;
+ * ```
+ */
 export const DHGroups: Record<string, DHGroup> = {
   modp1: {
     p: BigInt(
@@ -204,10 +219,23 @@ export const DHGroups: Record<string, DHGroup> = {
  * Basic Diffie Hellman implementation with focus on simplicity.
  * For now: non-constant time operations, no precomputes.
  *
- * We can speedup operations same way as in @noble/curves,
+ * We can speed up operations the same way as in `@noble/curves`,
  * but if re-key happens often it could be slow.
- * @param group well-known modp group or {p: bigint, g: bigint};
- * @returns
+ * @param group - Built-in MODP group name or explicit `{ p, g }` parameters.
+ * @returns Diffie-Hellman helpers for key generation and shared-secret derivation.
+ * @throws If the group selector is unknown or the supplied group parameters are invalid. {@link Error}
+ * @example
+ * Derive the same shared secret on both sides of a toy DH group.
+ * ```ts
+ * import { deepStrictEqual } from 'node:assert';
+ * import { DH } from 'micro-rsa-dsa-dh/dh.js';
+ * const dh = DH({ p: 23n, g: 5n });
+ * const alice = Uint8Array.of(6);
+ * const bob = Uint8Array.of(15);
+ * const alicePub = dh.getPublicKey(alice);
+ * const bobPub = dh.getPublicKey(bob);
+ * deepStrictEqual(dh.getSharedSecret(alice, bobPub), dh.getSharedSecret(bob, alicePub));
+ * ```
  */
 export const DH = (
   group: keyof DHGroup | DHGroup
@@ -229,7 +257,9 @@ export const DH = (
     getPublicKey(privateKey: Uint8Array): Uint8Array {
       const privNum = bytesToNumber(ensureBytes('private key', privateKey, bytesLen));
       const n = pow(g, privNum, p); // g^privateKey mod p
-      return numberToBytes(n);
+      // Public keys must stay fixed-width so they can round-trip into getSharedSecret()
+      // even when the modular exponentiation result has leading zero bytes.
+      return numberToBytes(n, bytesLen);
     },
     getSharedSecret(privateA: Uint8Array, publicB: Uint8Array): Uint8Array {
       const privNum = bytesToNumber(ensureBytes('private key', privateA, bytesLen));
@@ -240,4 +270,21 @@ export const DH = (
   };
 };
 
+/**
+ * Alias for `DH()`.
+ * @param group - Built-in MODP group name or explicit `{ p, g }` parameters.
+ * @returns Diffie-Hellman helpers for key generation and shared-secret derivation.
+ * @example
+ * Use the friendlier alias for the same DH helper.
+ * ```ts
+ * import { deepStrictEqual } from 'node:assert';
+ * import { diffieHellman } from 'micro-rsa-dsa-dh/dh.js';
+ * const dh = diffieHellman({ p: 23n, g: 5n });
+ * const alice = Uint8Array.of(6);
+ * const bob = Uint8Array.of(15);
+ * const alicePub = dh.getPublicKey(alice);
+ * const bobPub = dh.getPublicKey(bob);
+ * deepStrictEqual(dh.getSharedSecret(alice, bobPub), dh.getSharedSecret(bob, alicePub));
+ * ```
+ */
 export const diffieHellman: typeof DH = DH;

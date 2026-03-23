@@ -16,11 +16,31 @@ import {
   type RandFn,
 } from './utils.ts';
 
+/**
+ * DER parsing error for DSA signatures.
+ * @param m - Error message describing the invalid DER input.
+ * @example
+ * Raise a DER parsing error for malformed signatures.
+ * ```ts
+ * import { DERErr } from 'micro-rsa-dsa-dh/dsa.js';
+ * new DERErr('bad signature');
+ * ```
+ */
 export class DERErr extends Error {
   constructor(m = '') {
     super(m);
   }
 }
+
+/**
+ * Minimal ASN.1 DER helpers for DSA signatures.
+ * @example
+ * Convert an `(r, s)` pair into the DER form used on the wire.
+ * ```ts
+ * import { DER } from 'micro-rsa-dsa-dh/dsa.js';
+ * DER.hexFromSig({ r: 1n, s: 2n });
+ * ```
+ */
 export const DER = {
   // asn.1 DER encoding utils
   Err: DERErr satisfies typeof DERErr as typeof DERErr,
@@ -75,16 +95,25 @@ const isProbablePrimeDSA_P = (L: number, n: bigint, randFn: RandFn = randomBytes
 const isProbablePrimeDSA_Q = (N: number, n: bigint, randFn: RandFn = randomBytes) =>
   isProbablePrime(n, N === 160 ? 19 : N === 224 ? 24 : 27, randFn);
 
+/** DSA domain parameters and hash function. */
 export type DSAParams = {
-  p: bigint; // large prime number (at least 1024 bits)
-  q: bigint; // sufficiently large prime number (at least 160 bits) that is also a divisor of p-1
-  g: bigint; // generator for the multiplicative subgroup of order q of integers modulo p
+  /** Prime modulus for the DSA group, usually at least 1024 bits. */
+  p: bigint;
+  /** Prime-order subgroup size, usually at least 160 bits and dividing `p - 1`. */
+  q: bigint;
+  /** Generator for the multiplicative subgroup of order `q` of integers modulo `p`. */
+  g: bigint;
+  /** Hash function used for signatures and nonce derivation. */
   hash: Hash;
 };
 
+/** DSA domain parameters with the seed material used to derive them. */
 export type DSAProvableParams = DSAParams & {
+  /** Seed bytes used while deriving `p` and `q`. */
   domainParameterSeed: Uint8Array;
+  /** Prime-search counter returned by the derivation procedure. */
   counter: number;
+  /** Generator-derivation domain-separation index. */
   index: number;
 };
 
@@ -183,16 +212,25 @@ function genDSAGenerator(res: ReturnType<typeof genDSAPrimes>, index: number): b
 }
 
 /**
- *
+ * Generate DSA domain parameters.
  * @param L - The desired length of the prime p (in bits).
  * @param N - The desired length of the prime q (in bits).
- * @param hash - hash function
- * @param index - index (key separation, for example: index = 1 for digital signatures and with index = 2 for key establishment.)
- * @param seed - seed: Uint8Array or length in bits (greater or equal to N)
+ * @param hash - Hash function used to derive the primes and generator.
+ * @param index - Domain-separation index for generator derivation.
+ * @param seed - Optional seed bytes or seed length in bits.
+ * @param randFn - Random-byte generator used when `seed` is not fixed.
+ * @returns Provable DSA parameters and derivation metadata.
+ * @throws If the hash, seed, parameter sizes, or generator-derivation inputs are invalid. {@link Error}
  * @example
- * const params = genDSAParams(3072, 256, sha256, 1); // Generate random params
- * @example
- * const params = genDSAParams(3072, 256, sha256, 1, new Uint8Array([...])); // Generate params from known seed
+ * Generate parameters once, then reuse them when constructing a DSA helper.
+ * ```ts
+ * import { DSA, genDSAParams } from 'micro-rsa-dsa-dh/dsa.js';
+ * import { sha1 } from '@noble/hashes/legacy.js';
+ * const params = genDSAParams(1024, 160, sha1, 1, 160);
+ * const dsa = DSA(params);
+ * const privateKey = dsa.randomPrivateKey();
+ * privateKey;
+ * ```
  */
 export function genDSAParams(
   L: number,
@@ -211,10 +249,22 @@ export function genDSAParams(
 type Pred<T> = (v: Uint8Array) => T | undefined;
 /**
  * Minimal HMAC-DRBG from NIST 800-90 for RFC6979 sigs.
- * @returns function that will call DRBG until 2nd arg returns something meaningful
+ * @param hashLen - Output size of the HMAC function in bytes.
+ * @param qByteLen - Target byte length for generated candidates.
+ * @param hmacFn - HMAC-like function used to expand internal state.
+ * @returns Deterministic generator that retries until the predicate accepts the output.
+ * @throws If the hash length, output length, callback, or retry budget is invalid. {@link Error}
  * @example
- *   const drbg = createHmacDRBG<Key>(32, 32, hmac);
- *   drbg(seed, bytesToKey); // bytesToKey must return Key or undefined
+ * Build the RFC6979 nonce generator from HMAC-SHA256.
+ * ```ts
+ * import { hmac } from '@noble/hashes/hmac.js';
+ * import { sha256 } from '@noble/hashes/sha2.js';
+ * import { concatBytes } from '@noble/hashes/utils.js';
+ * import { createHmacDrbg } from 'micro-rsa-dsa-dh/dsa.js';
+ * const drbg = createHmacDrbg(32, 32, (key, ...msgs) => hmac(sha256, key, concatBytes(...msgs)));
+ * const out = drbg(new Uint8Array([1, 2, 3]), (bytes) => bytes);
+ * out;
+ * ```
  */
 export function createHmacDrbg<T>(
   hashLen: number,
@@ -272,8 +322,22 @@ export function createHmacDrbg<T>(
 
 /**
  * Simplified DSA implementation focusing on simplicity and basic functionality.
- * @param params - DSA parameters {p, q, g}
- * @returns DSA key generation, signing, and verification functions
+ * @param params - DSA domain parameters and hash function. See {@link DSAParams}.
+ * @returns DSA key generation, signing, and verification helpers.
+ * @throws If the supplied DSA domain parameters or hash function are invalid. {@link Error}
+ * @example
+ * Generate a fresh DSA keypair and sign a message with it.
+ * ```ts
+ * import { deepStrictEqual } from 'node:assert';
+ * import { DSA, genDSAParams } from 'micro-rsa-dsa-dh/dsa.js';
+ * import { sha1 } from '@noble/hashes/legacy.js';
+ * const dsa = DSA(genDSAParams(1024, 160, sha1, 1, 160));
+ * const privateKey = dsa.randomPrivateKey();
+ * const publicKey = dsa.getPublicKey(privateKey);
+ * const msg = new Uint8Array([1, 2, 3]);
+ * const sig = dsa.sign(privateKey, msg);
+ * deepStrictEqual(dsa.verify(publicKey, msg, sig), true);
+ * ```
  */
 export const DSA = (params: DSAParams) => {
   const { p, q, g, hash } = params;

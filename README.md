@@ -48,9 +48,9 @@ import {
   isProbablePrime,
   isProbablePrimeRSA,
   isProbablySafePrime,
-  IFCPrimes,
 } from 'micro-rsa-dsa-dh/primality.js';
 import {
+  IFCPrimes,
   keygen,
   mgf1,
   OAEP,
@@ -83,6 +83,7 @@ OAEP is Optimal Asymmetric Encryption Padding.
 Use if you need KEM (encrypt/decrypt).
 
 ```ts
+import { deepStrictEqual } from 'node:assert';
 import * as rsa from 'micro-rsa-dsa-dh/rsa.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 const alice = rsa.keygen(2048);
@@ -97,6 +98,7 @@ deepStrictEqual(oaep.decrypt(alice.privateKey, encrypted), msg);
 Use if you need signatures (sign/verify).
 
 ```ts
+import { deepStrictEqual } from 'node:assert';
 import * as rsa from 'micro-rsa-dsa-dh/rsa.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 const alice = rsa.keygen(2048);
@@ -113,6 +115,7 @@ This is old standard, OAEP/PSS is better.
 Signatures:
 
 ```ts
+import { deepStrictEqual } from 'node:assert';
 import * as rsa from 'micro-rsa-dsa-dh/rsa.js';
 const alice = rsa.keygen(2048);
 const pkcs = rsa.PKCS1_SHA256;
@@ -126,6 +129,7 @@ KEM (vulnerable [[1]](https://crypto.stackexchange.com/questions/12688/can-you-e
 ):
 
 ```ts
+import { deepStrictEqual } from 'node:assert';
 import * as rsa from 'micro-rsa-dsa-dh/rsa.js';
 const alice = rsa.keygen(2048);
 const pkcs = rsa.PKCS1_KEM;
@@ -143,6 +147,7 @@ Same as ECDH, seems safe if pre-defined groups are used. Cons:
 - Using custom non-standard groups can make algorithm weak
 
 ```ts
+import { deepStrictEqual } from 'node:assert';
 import { DH, DHGroups } from 'micro-rsa-dsa-dh/dh.js';
 const dh = DH('modp18');
 const alicePriv = dh.randomPrivateKey();
@@ -167,6 +172,7 @@ Same as ECDSA, but with big numbers. Cons:
 - Harder to protect from timing attacks
 
 ```ts
+import { deepStrictEqual } from 'node:assert';
 import * as dsa from 'micro-rsa-dsa-dh/dsa.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 // 1. Params
@@ -200,6 +206,7 @@ deepStrictEqual(bobDSA.verify(alicePubKey, msg, sig), true);
 Mostly for educational purpose: almost nobody uses it.
 
 ```ts
+import { deepStrictEqual } from 'node:assert';
 import { ElGamal, genElGamalParams } from 'micro-rsa-dsa-dh/elgamal.js';
 // NOTE: this is super slow! 512: 1s, 1024: 20s, 2048: 1046s
 const params = genElGamalParams(512);
@@ -221,6 +228,7 @@ deepStrictEqual(elgamal.verify(alicePub, msg, sig), true); // Other parties can 
 A bunch of primality tests.
 
 ```ts
+import { deepStrictEqual } from 'node:assert';
 import * as primality from 'micro-rsa-dsa-dh/primality.js';
 deepStrictEqual(primality.millerRabin(7n, 10), true);
 deepStrictEqual(primality.lucas(7n), true);

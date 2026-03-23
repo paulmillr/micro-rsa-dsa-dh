@@ -1,8 +1,17 @@
 import { describe, should } from '@paulmillr/jsbt/test.js';
-import { deepStrictEqual } from 'node:assert';
+import { deepStrictEqual, throws } from 'node:assert';
 import * as primality from '../src/primality.ts';
 import { IFCPrimes } from '../src/rsa.ts';
-import { gcd, sqrt } from '../src/utils.ts';
+import {
+  I2OSP,
+  ensureBytes,
+  gcd,
+  getFieldBytesLength,
+  hexToNumber,
+  mapHashToField,
+  pow,
+  sqrt,
+} from '../src/utils.ts';
 import { jsonGZ, parseTestFile } from './utils.ts';
 
 describe('primality', () => {
@@ -82,6 +91,18 @@ describe('primality', () => {
     deepStrictEqual(sqrt(16n), 4n);
     deepStrictEqual(sqrt(2359296n), 1536n);
     deepStrictEqual(sqrt(54866395443885995655625n), 234235768925n);
+    throws(() => sqrt(-1n), { name: 'RangeError' });
+  });
+
+  should('utils validation', () => {
+    throws(() => ensureBytes('msg', 1 as any), { name: 'TypeError' });
+    throws(() => ensureBytes('msg', 'zz'), { name: 'RangeError' });
+    throws(() => ensureBytes('msg', Uint8Array.of(1), 2), { name: 'RangeError' });
+    throws(() => I2OSP(256n, 1), { name: 'RangeError' });
+    throws(() => pow(2n, -1n, 11n), { name: 'RangeError' });
+    throws(() => hexToNumber(1 as any), { name: 'TypeError' });
+    throws(() => getFieldBytesLength(1 as any), { name: 'TypeError' });
+    throws(() => mapHashToField(new Uint8Array(1), 23n), { name: 'RangeError' });
   });
 
   should('Jacobi', () => {

@@ -1,6 +1,6 @@
-export * as dh from '../../dh.js';
-export * as dsa from '../../dsa.js';
-export * as elgamal from '../../elgamal.js';
-export * as primality from '../../primality.js';
-export * as rsa from '../../rsa.js';
-export * as utils from '../../utils.js';
+export * as dh from 'micro-rsa-dsa-dh/dh.js';
+export * as dsa from 'micro-rsa-dsa-dh/dsa.js';
+export * as elgamal from 'micro-rsa-dsa-dh/elgamal.js';
+export * as primality from 'micro-rsa-dsa-dh/primality.js';
+export * as rsa from 'micro-rsa-dsa-dh/rsa.js';
+export * as utils from 'micro-rsa-dsa-dh/utils.js';

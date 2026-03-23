@@ -2,9 +2,7 @@ import { randomBytes } from '@noble/hashes/utils.js';
 import { isProbablySafePrime } from './primality.ts';
 import { bytesToNumber, gcd, invert, mod, pow } from './utils.ts';
 
-/**
- * Returns random number in range [min, max)
- */
+/** Returns random number in range [min, max) */
 function randomBigInt(bytes: number, min: bigint, max: bigint, randFn = randomBytes) {
   let res;
   do res = bytesToNumber(randFn(bytes));
@@ -12,7 +10,29 @@ function randomBigInt(bytes: number, min: bigint, max: bigint, randFn = randomBy
   return res;
 }
 
-export type ElGamalParams = { p: bigint; g: bigint };
+/** ElGamal group parameters. */
+export type ElGamalParams = {
+  /** Prime modulus for the ElGamal group. */
+  p: bigint;
+  /** Generator used by the group. */
+  g: bigint;
+};
+
+/**
+ * Generate a random safe-prime ElGamal group.
+ * @param bits - Byte-aligned bit length for the generated prime.
+ * @returns Random ElGamal group parameters.
+ * @throws If the requested bit length is not a positive byte-aligned safe integer. {@link Error}
+ * @example
+ * Generate group parameters, then build an ElGamal helper from them.
+ * ```ts
+ * import { ElGamal, genElGamalParams } from 'micro-rsa-dsa-dh/elgamal.js';
+ * const params = genElGamalParams(256);
+ * const elgamal = ElGamal(params);
+ * const privateKey = elgamal.randomPrivateKey();
+ * privateKey;
+ * ```
+ */
 export function genElGamalParams(bits: number): ElGamalParams {
   if (!Number.isSafeInteger(bits) || bits <= 0 || bits % 8 !== 0)
     throw new Error('number of bits should be positive integer aligned to byte boundary');
@@ -33,7 +53,27 @@ export function genElGamalParams(bits: number): ElGamalParams {
   }
 }
 
-export const ElGamal = ({ p, g }: ElGamalParams) => {
+/**
+ * Build ElGamal encryption and signing helpers for a specific group.
+ * @param params - ElGamal group parameters. See {@link ElGamalParams}.
+ * @returns ElGamal helpers for key generation, encryption, decryption, signing, and verification.
+ * @throws If the supplied ElGamal group parameters are invalid. {@link Error}
+ * @example
+ * Encrypt, decrypt, sign, and verify inside a toy ElGamal group.
+ * ```ts
+ * import { deepStrictEqual } from 'node:assert';
+ * import { ElGamal } from 'micro-rsa-dsa-dh/elgamal.js';
+ * const elgamal = ElGamal({ p: 23n, g: 5n });
+ * const alicePriv = 6n;
+ * const alicePub = elgamal.getPublicKey(alicePriv);
+ * const msg = 8n;
+ * const encrypted = elgamal.encrypt(alicePub, msg, 7n);
+ * deepStrictEqual(elgamal.decrypt(alicePriv, encrypted), msg);
+ * deepStrictEqual(elgamal.verify(alicePub, msg, elgamal.sign(alicePriv, msg, 3n)), true);
+ * ```
+ */
+export const ElGamal = (params: ElGamalParams) => {
+  const { p, g } = params;
   if (typeof p !== 'bigint' || typeof g !== 'bigint') throw new Error('wrong params');
   if (g <= 1n || g >= p) throw new Error('g should be in the range 1 < g < p');
   const pBytes = p.toString(16).length / 2;

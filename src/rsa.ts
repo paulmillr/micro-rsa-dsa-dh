@@ -16,20 +16,55 @@ import {
   sqrt,
 } from './utils.ts';
 
+/** Variable-output hash or XOF helper. */
 export type VarLenHash = (msg: Uint8Array, opts: { dkLen: number }) => Uint8Array; // can be mgf(sha256)
 
+/** XOF helper with noble-style metadata. */
 export type HashXOF = VarLenHash & {
+  /** Input block size in bytes. */
   blockLen: number;
+  /**
+   * Creates a fresh incremental XOF instance.
+   * @param opts - Requested output length for the XOF instance.
+   * @returns New XOF object ready for `update(...).digest()`.
+   */
   create: (opts: { dkLen: number }) => any;
 };
 
+/** RSA encryption scheme interface. */
 export type KEM = {
+  /**
+   * Encrypts one plaintext with the RSA public key.
+   * @param publicKey - RSA public key used for encryption.
+   * @param plaintext - Message bytes to encrypt.
+   * @returns Ciphertext bytes ready for transport.
+   */
   encrypt(publicKey: PublicKey, plaintext: Uint8Array): Uint8Array;
+  /**
+   * Decrypts one ciphertext with the RSA private key.
+   * @param privateKey - RSA private key used for decryption.
+   * @param ciphertext - Ciphertext bytes to decrypt.
+   * @returns Decrypted plaintext bytes.
+   */
   decrypt(privateKey: PrivateKey, ciphertext: Uint8Array): Uint8Array;
 };
 
+/** RSA signature scheme interface. */
 export type Signer = {
+  /**
+   * Verifies one signature against the message and public key.
+   * @param publicKey - RSA public key used for verification.
+   * @param message - Message bytes that were signed.
+   * @param signature - Signature bytes to verify.
+   * @returns `true` when the signature is valid.
+   */
   verify(publicKey: PublicKey, message: Uint8Array, signature: Uint8Array): boolean;
+  /**
+   * Signs one message with the RSA private key.
+   * @param privateKey - RSA private key used for signing.
+   * @param message - Message bytes to sign.
+   * @returns Signature bytes.
+   */
   sign(privateKey: PrivateKey, message: Uint8Array): Uint8Array;
 };
 
@@ -47,6 +82,17 @@ const hashOutputLen = (hash: HashXOF, dkLen: number): Hash => {
  * @param e - Public exponent. Must be an odd positive integer
  * @param a - Optional parameter for p ≡ a mod 8.
  * @param b - Optional parameter for q ≡ b mod 8.
+ * @param randFn - Random-byte generator used to search for primes.
+ * @returns Probable RSA primes `p` and `q`.
+ * @throws If the modulus size, public exponent, or prime search fails validation. {@link Error}
+ * @example
+ * Generate the two primes that will back an RSA modulus.
+ * ```ts
+ * import { IFCPrimes } from 'micro-rsa-dsa-dh/rsa.js';
+ * const { p, q } = IFCPrimes(2048);
+ * const modulus = p * q;
+ * modulus.toString(16);
+ * ```
  */
 export function IFCPrimes(
   nlen: number,
@@ -99,7 +145,18 @@ function equalBytes(a: Uint8Array, b: Uint8Array) {
   return diff === 0;
 }
 
-// Takes Hash, returns VarLenHash
+/**
+ * Build the PKCS#1 MGF1 mask-generation function from a hash.
+ * @param hash - Hash function used for the underlying digest rounds.
+ * @returns Mask-generation function with variable output length.
+ * @example
+ * Expand a short seed into the mask used by OAEP or PSS.
+ * ```ts
+ * import { mgf1 } from 'micro-rsa-dsa-dh/rsa.js';
+ * import { sha256 } from '@noble/hashes/sha2.js';
+ * mgf1(sha256)(new Uint8Array([1, 2, 3]), { dkLen: 4 });
+ * ```
+ */
 export function mgf1(hash: Hash): VarLenHash {
   // From noble-post-quantum
   const counterB = new Uint8Array(4);
@@ -117,15 +174,11 @@ export function mgf1(hash: Hash): VarLenHash {
     return out.subarray(0, dkLen);
   };
 }
-/**
- * Represents an RSA public key.
- * @param n - The RSA modulus, a positive integer which is the product
- *            of two or more primes used in the RSA private key. This value
- *            is public and used in both encryption and signature verification.
- * @param e - The RSA public exponent, a positive integer (usually 65537). Must be coprime to the totient of the modulus.
- */
+/** Represents an RSA public key. */
 export type PublicKey = {
+  /** RSA modulus used for encryption and signature verification. */
   n: bigint;
+  /** RSA public exponent, usually `65537`. */
   e: bigint;
 };
 
@@ -139,13 +192,11 @@ const validatePublicKey = (key: PublicKey) => {
     throw new Error('wrong private key');
 };
 
-/**
- * Represents a simplified RSA private key with basic components.
- * @param n - The RSA modulus, a positive integer which is the product of two primes.
- * @param d - The RSA private exponent, a positive integer used in the decryption algorithm.
- */
+/** Represents a simplified RSA private key with basic components. */
 export type PrivateKey = {
+  /** RSA modulus shared with the public key. */
   n: bigint;
+  /** RSA private exponent used for decryption and signing. */
   d: bigint;
 };
 
@@ -219,13 +270,18 @@ function RSAVP1(publicKey: { n: bigint; e: bigint }, s: bigint): bigint | false 
 /**
  * Generates an RSA key pair.
  *
- * This function generates an RSA key pair using the given prime numbers `p` and `q`, and the public exponent `e`.
- * Output:
- *
- * @param p - A prime number.
- * @param q - A prime number.
- * @param e - The public exponent.
- * @returns An object containing the public key and the private key.
+ * @param nlen - Bit length of the RSA modulus to generate.
+ * @param e - Public exponent for the key pair.
+ * @param randFn - Random-byte generator used during prime search.
+ * @returns Generated RSA public and private key pair.
+ * @throws If the modulus size, public exponent, or prime generation inputs are invalid. {@link Error}
+ * @example
+ * Generate one RSA keypair for both encryption and signatures.
+ * ```ts
+ * import { keygen } from 'micro-rsa-dsa-dh/rsa.js';
+ * const alice = keygen(2048);
+ * alice.publicKey.n === alice.privateKey.n;
+ * ```
  */
 export function keygen(
   nlen: number,
@@ -241,10 +297,23 @@ export function keygen(
 }
 
 /**
- * improved ES; based on the optimal asymmetric encryption padding
- * @param hash
- * @param mgfHash
- * @param label optional label to be associated with the message
+ * RSAES-OAEP key encapsulation helper.
+ * @param hash - Hash function used for OAEP label and message digests.
+ * @param mgfHash - Mask-generation function used to derive OAEP masks.
+ * @param label - Optional label bound to every encryption/decryption operation.
+ * @returns OAEP encryption and decryption helpers.
+ * @example
+ * Encrypt with the public key and decrypt with the private key.
+ * ```ts
+ * import { deepStrictEqual } from 'node:assert';
+ * import { OAEP, keygen, mgf1 } from 'micro-rsa-dsa-dh/rsa.js';
+ * import { sha256 } from '@noble/hashes/sha2.js';
+ * const alice = keygen(2048);
+ * const kem = OAEP(sha256, mgf1(sha256));
+ * const msg = new Uint8Array([1, 2, 3]);
+ * const encrypted = kem.encrypt(alice.publicKey, msg);
+ * deepStrictEqual(kem.decrypt(alice.privateKey, encrypted), msg);
+ * ```
  */
 export const OAEP = (
   hash: Hash,
@@ -356,8 +425,22 @@ function EMSA_PSS_VERIFY(M: Uint8Array, EM: Uint8Array, emBits: number, opts: PS
 
 /**
  * EMSA-PSS: improved EMSA, based on the probabilistic signature scheme
- * @param opts
- * @returns
+ * @param hash - Hash function used to digest the message.
+ * @param mgfHash - Mask-generation function used inside PSS encoding.
+ * @param sLen - Salt length in bytes.
+ * @returns RSA-PSS signing and verification helpers.
+ * @example
+ * Sign a message with RSA-PSS and verify it with the public key.
+ * ```ts
+ * import { deepStrictEqual } from 'node:assert';
+ * import { PSS, keygen, mgf1 } from 'micro-rsa-dsa-dh/rsa.js';
+ * import { sha256 } from '@noble/hashes/sha2.js';
+ * const alice = keygen(2048);
+ * const signer = PSS(sha256, mgf1(sha256));
+ * const msg = new Uint8Array([1, 2, 3]);
+ * const sig = signer.sign(alice.privateKey, msg);
+ * deepStrictEqual(signer.verify(alice.publicKey, msg, sig), true);
+ * ```
  */
 export const PSS = (hash: Hash, mgfHash: VarLenHash, sLen: number = 0): Signer => ({
   sign(privateKey: PrivateKey, M: Uint8Array): Uint8Array {
@@ -416,6 +499,16 @@ function EMSA_PKCS1_V1_5_ENCODE(
 
 /**
  * RSAES-PKCS1-v1_5: older Encryption/decryption Scheme (ES) as first standardized in version 1.5 of PKCS #1. Known-vulnerable.
+ * @example
+ * Older PKCS#1 v1.5 encryption still round-trips through the same keypair.
+ * ```ts
+ * import { deepStrictEqual } from 'node:assert';
+ * import { PKCS1_KEM, keygen } from 'micro-rsa-dsa-dh/rsa.js';
+ * const alice = keygen(2048);
+ * const msg = new Uint8Array([1, 2, 3]);
+ * const encrypted = PKCS1_KEM.encrypt(alice.publicKey, msg);
+ * deepStrictEqual(PKCS1_KEM.decrypt(alice.privateKey, encrypted), msg);
+ * ```
  */
 export const PKCS1_KEM: KEM = {
   encrypt(publicKey: PublicKey, M: Uint8Array): Uint8Array {
@@ -463,13 +556,25 @@ export const PKCS1_KEM: KEM = {
   },
 };
 
+/** PKCS#1 v1.5 signing interface. */
 export interface IPKCS {
+  /**
+   * Verifies a PKCS#1 v1.5 signature.
+   * @param publicKey - RSA public key used for verification.
+   * @param M - Message bytes that were signed.
+   * @param S - Signature bytes to verify.
+   * @returns `true` when the signature is valid.
+   */
   verify(publicKey: PublicKey, M: Uint8Array, S: Uint8Array): boolean;
+  /**
+   * Signs one message with PKCS#1 v1.5.
+   * @param privateKey - RSA private key used for signing.
+   * @param M - Message bytes to sign.
+   * @returns Signature bytes.
+   */
   sign(privateKey: PrivateKey, M: Uint8Array): Uint8Array;
 }
-/**
- * RSASSA-PKCS1-v1_5: old Signature Scheme with Appendix (SSA) as first standardized in version 1.5 of PKCS #1.
- */
+/** RSASSA-PKCS1-v1_5: old Signature Scheme with Appendix (SSA) as first standardized in version 1.5 of PKCS #1. */
 const PKCS1 = (hash: Hash, prefix: string): IPKCS => ({
   verify(publicKey: PublicKey, M: Uint8Array, S: Uint8Array): boolean {
     validatePublicKey(publicKey);
@@ -499,44 +604,55 @@ const PKCS1 = (hash: Hash, prefix: string): IPKCS => ({
 });
 
 // Encoded OIDs
+/** PKCS#1 v1.5 signer using SHA-1. */
 export const PKCS1_SHA1: IPKCS = /* @__PURE__ */ PKCS1(sha1, '3021300906052b0e03021a05000414');
+/** PKCS#1 v1.5 signer using SHA-224. */
 export const PKCS1_SHA224: IPKCS = /* @__PURE__ */ PKCS1(
   sha224,
   '302d300d06096086480165030402040500041c'
 );
+/** PKCS#1 v1.5 signer using SHA-256. */
 export const PKCS1_SHA256: IPKCS = /* @__PURE__ */ PKCS1(
   sha256,
   '3031300d060960864801650304020105000420'
 );
+/** PKCS#1 v1.5 signer using SHA-384. */
 export const PKCS1_SHA384: IPKCS = /* @__PURE__ */ PKCS1(
   sha384,
   '3041300d060960864801650304020205000430'
 );
+/** PKCS#1 v1.5 signer using SHA-512. */
 export const PKCS1_SHA512: IPKCS = /* @__PURE__ */ PKCS1(
   sha512,
   '3051300d060960864801650304020305000440'
 );
+/** PKCS#1 v1.5 signer using SHA-512/224. */
 export const PKCS1_SHA512_224: IPKCS = /* @__PURE__ */ PKCS1(
   sha512_224,
   '302d300d06096086480165030402050500041c'
 );
+/** PKCS#1 v1.5 signer using SHA-512/256. */
 export const PKCS1_SHA512_256: IPKCS = /* @__PURE__ */ PKCS1(
   sha512_256,
   '3031300d060960864801650304020605000420'
 );
 // https://github.com/usnistgov/ACVP-Server/issues/257#issuecomment-1502669140
+/** PKCS#1 v1.5 signer using SHA3-224. */
 export const PKCS1_SHA3_224: IPKCS = /* @__PURE__ */ PKCS1(
   sha3_224,
   '302d300d06096086480165030402070500041c'
 );
+/** PKCS#1 v1.5 signer using SHA3-256. */
 export const PKCS1_SHA3_256: IPKCS = /* @__PURE__ */ PKCS1(
   sha3_256,
   '3031300d060960864801650304020805000420'
 );
+/** PKCS#1 v1.5 signer using SHA3-384. */
 export const PKCS1_SHA3_384: IPKCS = /* @__PURE__ */ PKCS1(
   sha3_384,
   '3041300d060960864801650304020905000430'
 );
+/** PKCS#1 v1.5 signer using SHA3-512. */
 export const PKCS1_SHA3_512: IPKCS = /* @__PURE__ */ PKCS1(
   sha3_512,
   '3051300d060960864801650304020a05000440'

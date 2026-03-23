@@ -6,7 +6,7 @@
   "type": "module",
   "devDependencies": {
     "micro-rsa-dsa-dh": "file:..",
-    "esbuild": "0.20.1"
+    "esbuild": "0.25.3"
   },
   "scripts": {
     "build:release": "npx esbuild --bundle input.js --outfile=`npx jsbt outfile` --global-name=`npx jsbt global`"

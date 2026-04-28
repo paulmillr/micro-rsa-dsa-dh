@@ -1,6 +1,6 @@
 {
   "name": "micro-rsa-dsa-dh",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Minimal implementation of older cryptography algorithms: RSA, DSA, DH, ElGamal",
   "files": [
     "*.js",

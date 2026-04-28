@@ -1,6 +1,6 @@
 {
   "name": "@paulmillr/micro-rsa-dsa-dh",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "exports": {
     ".": "./src/index.ts",
     "./dh.js": "./src/dh.ts",

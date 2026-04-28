@@ -11,7 +11,7 @@
     "./utils.js": "./src/utils.ts"
   },
   "imports": {
-    "@noble/hashes": "jsr:@noble/hashes@^2.0.0"
+    "@noble/hashes": "jsr:@noble/hashes@^2.2.0"
   },
   "publish": {
     "include": [

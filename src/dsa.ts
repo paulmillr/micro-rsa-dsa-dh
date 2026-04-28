@@ -1,20 +1,41 @@
 import { hmac } from '@noble/hashes/hmac.js';
-import { concatBytes, hexToBytes, isBytes, randomBytes } from '@noble/hashes/utils.js';
+import {
+  ahash,
+  type CHash,
+  concatBytes,
+  hexToBytes,
+  isBytes,
+  randomBytes,
+} from '@noble/hashes/utils.js';
 import { isProbablePrime } from './primality.ts';
 import {
   bytesToNumber,
+  ensureBytes,
   getFieldBytesLength,
   getMinHashLength,
-  type Hash,
   I2OSP,
   invert,
   mapHashToField,
   mod,
-  numberToBytes,
+  numberToBytesBE,
   OS2IP,
   pow,
   type RandFn,
+  type TArg,
+  type TRet,
 } from './utils.ts';
+
+const _0n = /* @__PURE__ */ BigInt(0);
+const _1n = /* @__PURE__ */ BigInt(1);
+const _2n = /* @__PURE__ */ BigInt(2);
+
+type DERSig = { r: bigint; s: bigint };
+type DERApi = {
+  Err: typeof DERErr;
+  _parseInt(data: Uint8Array): { d: bigint; l: Uint8Array };
+  toSig(hex: string | Uint8Array): DERSig;
+  hexFromSig(sig: DERSig): string;
+};
 
 /**
  * DER parsing error for DSA signatures.
@@ -34,6 +55,8 @@ export class DERErr extends Error {
 
 /**
  * Minimal ASN.1 DER helpers for DSA signatures.
+ * RFC 3279 Dss-Sig-Value encodes DSA signatures as a SEQUENCE of two INTEGER values.
+ * Supported DSA sizes keep the DER payload under 128 bytes, so short-form lengths are enough.
  * @example
  * Convert an `(r, s)` pair into the DER form used on the wire.
  * ```ts
@@ -41,10 +64,10 @@ export class DERErr extends Error {
  * DER.hexFromSig({ r: 1n, s: 2n });
  * ```
  */
-export const DER = {
+export const DER: TRet<DERApi> = /* @__PURE__ */ Object.freeze({
   // asn.1 DER encoding utils
   Err: DERErr satisfies typeof DERErr as typeof DERErr,
-  _parseInt(data: Uint8Array): { d: bigint; l: Uint8Array } {
+  _parseInt(data: TArg<Uint8Array>): TRet<{ d: bigint; l: Uint8Array }> {
     const { Err: E } = DER;
     if (data.length < 2 || data[0] !== 0x02) throw new E('Invalid signature integer tag');
     const len = data[1];
@@ -57,9 +80,12 @@ export const DER = {
     if (res[0] & 0b10000000) throw new E('Invalid signature integer: negative');
     if (res[0] === 0x00 && !(res[1] & 0b10000000))
       throw new E('Invalid signature integer: unnecessary leading zero');
-    return { d: bytesToNumber(res), l: data.subarray(len + 2) }; // d is data, l is left
+    return { d: bytesToNumber(res), l: data.subarray(len + 2) } as TRet<{
+      d: bigint;
+      l: Uint8Array;
+    }>; // d is data, l is left
   },
-  toSig(hex: string | Uint8Array): { r: bigint; s: bigint } {
+  toSig(hex: TArg<string | Uint8Array>): DERSig {
     // parse DER signature
     const { Err: E } = DER;
     const data = typeof hex === 'string' ? hexToBytes(hex) : hex;
@@ -72,7 +98,10 @@ export const DER = {
     if (rBytesLeft.length) throw new E('Invalid signature: left bytes after parsing');
     return { r, s };
   },
-  hexFromSig(sig: { r: bigint; s: bigint }): string {
+  hexFromSig(sig: DERSig): string {
+    // Callers must pass positive nonzero signature values; this serializer only adds
+    // DER sign-bit padding and does not sanitize invalid DSA components such as r = 0
+    // or s = 0.
     // Add leading zero if first byte has negative bit enabled. More details in '_parseInt'
     const slice = (s: string): string => (Number.parseInt(s[0], 16) & 0b1000 ? '00' + s : s);
     const h = (num: number | bigint) => {
@@ -87,12 +116,14 @@ export const DER = {
     const rl = h(rhl);
     return `30${h(rhl + shl + 4)}02${rl}${r}02${sl}${s}`;
   },
-};
+});
 
 // Table C.1. Minimum number of Miller-Rabin iterations for DSA
-const isProbablePrimeDSA_P = (L: number, n: bigint, randFn: RandFn = randomBytes) =>
+// FIPS 186-5 no longer includes DSA prime-generation algorithms, so the legacy DSA
+// helpers keep their supported Miller-Rabin round counts inline.
+const isProbablePrimeDSA_P = (L: number, n: bigint, randFn: TArg<RandFn> = randomBytes) =>
   isProbablePrime(n, L === 3072 ? 2 : 3, randFn);
-const isProbablePrimeDSA_Q = (N: number, n: bigint, randFn: RandFn = randomBytes) =>
+const isProbablePrimeDSA_Q = (N: number, n: bigint, randFn: TArg<RandFn> = randomBytes) =>
   isProbablePrime(n, N === 160 ? 19 : N === 224 ? 24 : 27, randFn);
 
 /** DSA domain parameters and hash function. */
@@ -104,7 +135,7 @@ export type DSAParams = {
   /** Generator for the multiplicative subgroup of order `q` of integers modulo `p`. */
   g: bigint;
   /** Hash function used for signatures and nonce derivation. */
-  hash: Hash;
+  hash: CHash;
 };
 
 /** DSA domain parameters with the seed material used to derive them. */
@@ -127,14 +158,19 @@ export type DSAProvableParams = DSAParams & {
 function genDSAPrimes(
   L: number,
   N: number,
-  hash: Hash,
-  seed?: Uint8Array | number,
-  randFn: RandFn = randomBytes
+  hash: TArg<CHash>,
+  seed?: TArg<Uint8Array | number>,
+  randFn: TArg<RandFn> = randomBytes
 ) {
   if (!Number.isSafeInteger(L) || !Number.isSafeInteger(N)) throw new Error('wrong L/N params');
+  ahash(hash);
   // From FIPS186-4: 4.2 Selection of Parameter Sizes and Hash Functions for DSA
   const pairs: Record<number, number[]> = { 1024: [160], 2048: [224, 256], 3072: [256] };
-  if (!pairs[L].includes(N)) throw new Error(`Invalid L/N pair: possible N=${pairs[L]}`);
+  const possibleN = pairs[L];
+  // This legacy FIPS 186-4 parameter table is finite; validate L before
+  // checking N so unsupported sizes fail as input errors, not internal TypeErrors.
+  if (!possibleN || !possibleN.includes(N))
+    throw new Error(`Invalid L/N pair: possible N=${possibleN || 'none'}`);
   const outlen = hash.outputLen * 8;
   // NOTE: we ask user to provide seed instead
   if (!Number.isSafeInteger(seed) && !isBytes(seed) && seed !== undefined)
@@ -145,34 +181,36 @@ function genDSAPrimes(
   const seedBytesLen = seedlen / 8;
   const n = Math.ceil(L / outlen) - 1; // 3
   const b = L - 1 - n * outlen; // 4
-  const mask = 2n ** BigInt(N - 1);
+  const mask = _2n ** BigInt(N - 1);
   while (true) {
-    const domainParameterSeed = isBytes(seedOrLen) ? seedOrLen : randFn(seedBytesLen);
+    const domainParameterSeed = isBytes(seedOrLen)
+      ? ensureBytes('seed', seedOrLen)
+      : (randFn(seedBytesLen) as TRet<Uint8Array>);
     const U = bytesToNumber(hash(domainParameterSeed)) % mask; // 6
-    let q = mask + U + 1n - (U % 2n); // 7
+    let q = mask + U + _1n - (U % _2n); // 7
     if (!isProbablePrimeDSA_Q(N, q, randFn)) {
       if (isBytes(seed)) throw new Error('Fixed seed, Q is not prime');
       continue; // 9
     }
-    let offset = 1n; // 10
+    let offset = _1n; // 10
     for (let counter = 0; counter < 4 * L; counter++) {
       // 11.1
       const V: bigint[] = [];
       for (let j = 0; j <= n; j++) {
         const seedWithOffset =
-          bytesToNumber(domainParameterSeed) + offset + (BigInt(j) % 2n ** BigInt(seedlen));
-        V.push(bytesToNumber(hash(numberToBytes(seedWithOffset, seedBytesLen))));
+          bytesToNumber(domainParameterSeed) + offset + (BigInt(j) % _2n ** BigInt(seedlen));
+        V.push(bytesToNumber(hash(numberToBytesBE(seedWithOffset, seedBytesLen))));
       }
       let W = V[0];
-      for (let i = 1; i < n; i++) W += V[i] * 2n ** BigInt(i * outlen);
-      W += (V[n] % 2n ** BigInt(b)) * 2n ** BigInt(n * outlen); // 11.2
-      const X = W + 2n ** BigInt(L - 1); // 11.3: 0 ≤ W < 2L–1; hence, 2L–1 ≤ X < 2L
-      const c = X % (2n * q); // 11.4
-      const p = X - (c - 1n); // 11.5: p ≡ 1 (mod 2q).
-      if (p >= 2n ** BigInt(L - 1) && isProbablePrimeDSA_P(L, p, randFn)) {
+      for (let i = 1; i < n; i++) W += V[i] * _2n ** BigInt(i * outlen);
+      W += (V[n] % _2n ** BigInt(b)) * _2n ** BigInt(n * outlen); // 11.2
+      const X = W + _2n ** BigInt(L - 1); // 11.3: 0 ≤ W < 2L–1; hence, 2L–1 ≤ X < 2L
+      const c = X % (_2n * q); // 11.4
+      const p = X - (c - _1n); // 11.5: p ≡ 1 (mod 2q).
+      if (p >= _2n ** BigInt(L - 1) && isProbablePrimeDSA_P(L, p, randFn)) {
         return { p, q, domainParameterSeed, counter, hash };
       }
-      offset += BigInt(n) + 1n; // 11.9
+      offset += BigInt(n) + _1n; // 11.9
     }
   }
 }
@@ -194,7 +232,7 @@ function genDSAGenerator(res: ReturnType<typeof genDSAPrimes>, index: number): b
   ) {
     throw new Error('wrong params');
   }
-  const e = (p - 1n) / q; // Step 3
+  const e = (p - _1n) / q; // Step 3
   for (let count = 0; ; ) {
     count++; // Step 5
     count &= 0xffff; // 16 bit integer
@@ -207,7 +245,7 @@ function genDSAGenerator(res: ReturnType<typeof genDSAPrimes>, index: number): b
     ); // Step 7
     const W = bytesToNumber(hash(U)); // Step 8
     const g = pow(W, e, p); // W ** e % P
-    if (g >= 2n) return g;
+    if (g >= _2n) return g;
   }
 }
 
@@ -235,18 +273,26 @@ function genDSAGenerator(res: ReturnType<typeof genDSAPrimes>, index: number): b
 export function genDSAParams(
   L: number,
   N: number,
-  hash: Hash,
+  hash: TArg<CHash>,
   index: number,
-  seed?: Uint8Array | number,
-  randFn: typeof randomBytes = randomBytes
-): DSAProvableParams {
-  if (typeof hash !== 'function') throw new Error('wrong hash');
+  seed?: TArg<Uint8Array | number>,
+  randFn: TArg<RandFn> = randomBytes
+): TRet<DSAProvableParams> {
+  ahash(hash);
   const res = genDSAPrimes(L, N, hash, seed, randFn);
   const g = genDSAGenerator(res, index);
-  return { ...res, index, g };
+  return { ...res, index, g } as TRet<DSAProvableParams>;
 }
 
 type Pred<T> = (v: Uint8Array) => T | undefined;
+type HmacFn = (key: Uint8Array, ...messages: Uint8Array[]) => Uint8Array;
+type Drbg<T> = (seed: Uint8Array, predicate: Pred<T>) => T;
+type DSAApi = {
+  randomPrivateKey(): bigint;
+  getPublicKey(privateKey: bigint): bigint;
+  sign(privateKey: bigint, message: Uint8Array): Uint8Array;
+  verify(publicKey: bigint, msg: Uint8Array, sig: Uint8Array): boolean;
+};
 /**
  * Minimal HMAC-DRBG from NIST 800-90 for RFC6979 sigs.
  * @param hashLen - Output size of the HMAC function in bytes.
@@ -269,34 +315,36 @@ type Pred<T> = (v: Uint8Array) => T | undefined;
 export function createHmacDrbg<T>(
   hashLen: number,
   qByteLen: number,
-  hmacFn: (key: Uint8Array, ...messages: Uint8Array[]) => Uint8Array
-): (seed: Uint8Array, predicate: Pred<T>) => T {
+  hmacFn: TArg<HmacFn>
+): TRet<Drbg<T>> {
   if (typeof hashLen !== 'number' || hashLen < 2) throw new Error('hashLen must be a number');
   if (typeof qByteLen !== 'number' || qByteLen < 2) throw new Error('qByteLen must be a number');
   if (typeof hmacFn !== 'function') throw new Error('hmacFn must be a function');
-  const NULL = Uint8Array.of();
-  const byte0 = Uint8Array.of(0);
-  const byte1 = Uint8Array.of(1);
+  const NULL = Uint8Array.of() as TRet<Uint8Array>;
+  const byte0 = Uint8Array.of(0) as TRet<Uint8Array>;
+  const byte1 = Uint8Array.of(1) as TRet<Uint8Array>;
   const maxDrbgIters = 1000;
   // Step B, Step C: set hashLen to 8*ceil(hlen/8)
-  let v: Uint8Array = new Uint8Array(hashLen); // Minimal non-full-spec HMAC-DRBG from NIST 800-90 for RFC6979 sigs.
-  let k: Uint8Array = new Uint8Array(hashLen); // Steps B and C of RFC6979 3.2: set hashLen, in our case always same
+  let v: TRet<Uint8Array> = new Uint8Array(hashLen) as TRet<Uint8Array>; // Minimal non-full-spec HMAC-DRBG from NIST 800-90 for RFC6979 sigs.
+  let k: TRet<Uint8Array> = new Uint8Array(hashLen) as TRet<Uint8Array>; // Steps B and C of RFC6979 3.2: set hashLen, in our case always same
   let i = 0; // Iterations counter, will throw when over 1000
   const reset = () => {
     v.fill(1);
     k.fill(0);
     i = 0;
   };
-  const h = (...b: Uint8Array[]): Uint8Array => hmacFn(k, v, ...b); // hmac(k)(v, ...values)
-  const reseed = (seed: Uint8Array = NULL) => {
+  const h = (...b: TArg<Uint8Array[]>): TRet<Uint8Array> =>
+    hmacFn(k, v, ...(b as TRet<Uint8Array>[])) as TRet<Uint8Array>; // hmac(k)(v, ...values)
+  const reseed = (seed: TArg<Uint8Array> = NULL) => {
+    const seedBytes = ensureBytes('seed', seed);
     // HMAC-DRBG reseed() function. Steps D-G
-    k = h(byte0, seed); // k = hmac(k || v || 0x00 || seed)
+    k = h(byte0, seedBytes); // k = hmac(k || v || 0x00 || seed)
     v = h(); // v = hmac(k || v)
-    if (seed.length === 0) return;
-    k = h(byte1, seed); // k = hmac(k || v || 0x01 || seed)
+    if (seedBytes.length === 0) return;
+    k = h(byte1, seedBytes); // k = hmac(k || v || 0x01 || seed)
     v = h(); // v = hmac(k || v)
   };
-  const gen = () => {
+  const gen = (): TRet<Uint8Array> => {
     // HMAC-DRBG generate() function
     if (i++ >= maxDrbgIters) throw new Error('drbg: tried max iterations');
     let len = 0;
@@ -309,15 +357,16 @@ export function createHmacDrbg<T>(
     }
     return concatBytes(...out);
   };
-  const genUntil = (seed: Uint8Array, pred: Pred<T>): T => {
+  const genUntil = (seed: TArg<Uint8Array>, pred: TArg<Pred<T>>): T => {
     reset();
     reseed(seed); // Steps D-G
-    let res: T | undefined = undefined; // Step H: grind until k is in [1..n-1]
-    while (!(res = pred(gen()))) reseed();
+    let res: T | undefined = undefined; // RFC6979 3.2 step H: grind until the predicate accepts a candidate.
+    // The predicate reports rejection with undefined; defined falsy values like 0 are valid generic outputs.
+    while ((res = pred(gen()) as T | undefined) === undefined) reseed();
     reset();
     return res;
   };
-  return genUntil;
+  return genUntil as TRet<Drbg<T>>;
 }
 
 /**
@@ -339,64 +388,90 @@ export function createHmacDrbg<T>(
  * deepStrictEqual(dsa.verify(publicKey, msg, sig), true);
  * ```
  */
-export const DSA = (params: DSAParams) => {
+export const DSA = (params: TArg<DSAParams>): TRet<DSAApi> => {
   const { p, q, g, hash } = params;
   if (typeof p !== 'bigint' || typeof q !== 'bigint' || typeof g !== 'bigint')
     throw new Error('wrong DSAParams');
-  if (typeof hash !== 'function') throw new Error('wrong hash');
+  ahash(hash);
   const fieldBytes = getFieldBytesLength(q);
   const fieldBits = q.toString(2).length;
   // RFC6979: ensure ECDSA msg is X bytes and < N. RFC suggests optional truncating via bits2octets.
   // FIPS 186-4 4.6 suggests the leftmost min(nBitLen, outLen) bits, which matches bits2int.
   // bits2int can produce res>N, we can do mod(res, N) since the bitLen is the same.
   // int2octets can't be used; pads small msgs with 0: unacceptatble for trunc as per RFC vectors
-  const bits2int = function (bytes: Uint8Array): bigint {
+  const bits2int = function (bytes: TArg<Uint8Array>): bigint {
     // For curves with nBitLength % 8 !== 0: bits2octets(bits2octets(m)) !== bits2octets(m)
     // for some cases, since bytes.length * 8 is not actual bitLength.
     const num = bytesToNumber(bytes); // check for == u8 done here
     const delta = bytes.length * 8 - fieldBits; // truncate to fieldBits leftmost bits
     return delta > 0 ? num >> BigInt(delta) : num;
   };
+  const validatePrivateKey = (privateKey: bigint) => {
+    // RFC6979 2.2: the DSA private key x "shall not be 0" and is in [1, q-1].
+    // Node/OpenSSL accepts crafted x=0 keys and derives y=1; keep this API on the RFC interval.
+    if (typeof privateKey !== 'bigint' || privateKey <= _0n || privateKey >= q)
+      throw new Error('invalid private key');
+  };
+  const isValidPublicKey = (publicKey: bigint): boolean => {
+    // RFC6979 2.1 makes g an order-q generator; RFC6979 2.2 defines DSA public
+    // keys as y = g^x mod p with x in [1, q-1]. Rejecting y=1 is derived, not
+    // a direct quote: an order-q generator reaches identity only for exponents
+    // congruent to 0 mod q, and that exponent is outside [1, q-1].
+    // Node/OpenSSL accepts crafted y=1 DSA public keys; keep verification on
+    // the RFC-derived key relation instead.
+    return (
+      typeof publicKey === 'bigint' &&
+      _1n < publicKey &&
+      publicKey < p &&
+      pow(publicKey, q, p) === _1n
+    );
+  };
   return {
     randomPrivateKey(): bigint {
       return bytesToNumber(mapHashToField(randomBytes(getMinHashLength(q)), q));
     },
     getPublicKey: (privateKey: bigint): bigint => {
+      validatePrivateKey(privateKey);
       return pow(g, privateKey, p);
     },
-    sign: (privateKey: bigint, message: Uint8Array): Uint8Array => {
-      const mHash = hash(message);
-      const hmacFn = (key: Uint8Array, ...msgs: Uint8Array[]) =>
-        hmac(hash as any, key, concatBytes(...msgs));
+    sign: (privateKey: bigint, message: TArg<Uint8Array>): TRet<Uint8Array> => {
+      validatePrivateKey(privateKey);
+      const msg = ensureBytes('message', message);
+      const mHash = hash(msg);
+      const hmacFn = (key: TArg<Uint8Array>, ...msgs: TArg<Uint8Array[]>): TRet<Uint8Array> =>
+        hmac(hash, key, concatBytes(...msgs));
       const drbg = createHmacDrbg(hash.outputLen, fieldBytes, hmacFn);
       const h = mod(bits2int(mHash), q);
       const seed = concatBytes(I2OSP(privateKey % q, fieldBytes), I2OSP(h, fieldBytes)); // Step D of RFC6979 3.2
       const k = drbg(seed, (kBytes) => {
         kBytes = kBytes.subarray(0, fieldBytes); // hash can be bigger than fieldBytes
         const k = OS2IP(kBytes);
-        if (1n < k && k < q - 1n) return k;
+        if (_1n < k && k < q - _1n) return k;
         return;
       }) as bigint; // Steps B, C, D, E, F, G
       const r = pow(g, k, p) % q; // (g^k % p) % q
       const ik = invert(k, q); // k^-1 mod n
       const s = mod(ik * mod(h + r * privateKey, q), q);
       // compact (P1363)
-      const res = concatBytes(numberToBytes(r, fieldBytes), numberToBytes(s, fieldBytes));
+      const res = concatBytes(numberToBytesBE(r, fieldBytes), numberToBytesBE(s, fieldBytes));
       return res;
     },
-    verify: (publicKey: bigint, msg: Uint8Array, sig: Uint8Array): boolean => {
+    verify: (publicKey: bigint, msg: TArg<Uint8Array>, sig: TArg<Uint8Array>): boolean => {
+      const message = ensureBytes('message', msg);
+      const signature = ensureBytes('signature', sig);
       let r, s;
       // Signature can be represented in 2 ways: compact (2*nByteLength) & DER (variable-length).
       // Since DER can also be 2*nByteLength bytes, we check for it first.
       try {
-        ({ r, s } = DER.toSig(sig));
+        ({ r, s } = DER.toSig(signature));
       } catch (derError) {
         if (!(derError instanceof DER.Err)) throw derError;
-        r = bytesToNumber(sig.slice(0, fieldBytes));
-        s = bytesToNumber(sig.slice(fieldBytes, 2 * fieldBytes));
+        r = bytesToNumber(signature.slice(0, fieldBytes));
+        s = bytesToNumber(signature.slice(fieldBytes, 2 * fieldBytes));
       }
-      if (r <= 0n || r >= q || s <= 0n || s >= q) return false;
-      const h = mod(bits2int(hash(msg)), q);
+      if (!isValidPublicKey(publicKey)) return false;
+      if (r <= _0n || r >= q || s <= _0n || s >= q) return false;
+      const h = mod(bits2int(hash(message)), q);
       const is = invert(s, q); // s^-1
       const u1 = mod(h * is, q); // u1 = hs^-1 mod n
       const u2 = mod(r * is, q); // u2 = rs^-1 mod n
@@ -408,7 +483,7 @@ export const DSA = (params: DSAParams) => {
   };
 };
 
-export const _TEST: any = {
+export const _TEST: any = /* @__PURE__ */ Object.freeze({
   genDSAPrimes,
   genDSAGenerator,
-};
+});

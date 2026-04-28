@@ -103,6 +103,29 @@ describe('ElGamal', () => {
       deepStrictEqual(elgamal.verify(y, h, sig), true);
     }
   });
+  should('handles odd-byte modulus widths in generated secrets', () => {
+    const saved = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        getRandomValues(arr: Uint8Array) {
+          arr.set(Uint8Array.of(0, 5));
+          return arr;
+        },
+      },
+    });
+    try {
+      const elgamal = elg.ElGamal({ p: 257n, g: 3n });
+      const privateKey = elgamal.randomPrivateKey();
+      deepStrictEqual(privateKey, 5n);
+      const publicKey = elgamal.getPublicKey(7n);
+      const msg = 9n;
+      deepStrictEqual(elgamal.decrypt(7n, elgamal.encrypt(publicKey, msg)), msg);
+      deepStrictEqual(elgamal.verify(publicKey, msg, elgamal.sign(7n, msg)), true);
+    } finally {
+      if (saved) Object.defineProperty(globalThis, 'crypto', saved);
+    }
+  });
 });
 
 should.runWhen(import.meta.url);

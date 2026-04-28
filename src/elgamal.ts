@@ -1,6 +1,11 @@
 import { randomBytes } from '@noble/hashes/utils.js';
 import { isProbablySafePrime } from './primality.ts';
-import { bytesToNumber, gcd, invert, mod, pow } from './utils.ts';
+import { bytesToNumber, gcd, getFieldBytesLength, invert, mod, pow } from './utils.ts';
+
+const _0n = /* @__PURE__ */ BigInt(0);
+const _1n = /* @__PURE__ */ BigInt(1);
+const _2n = /* @__PURE__ */ BigInt(2);
+const _3n = /* @__PURE__ */ BigInt(3);
 
 /** Returns random number in range [min, max) */
 function randomBigInt(bytes: number, min: bigint, max: bigint, randFn = randomBytes) {
@@ -16,6 +21,16 @@ export type ElGamalParams = {
   p: bigint;
   /** Generator used by the group. */
   g: bigint;
+};
+type ElGamalCiphertext = { ct1: bigint; ct2: bigint };
+type ElGamalSignature = { r: bigint; s: bigint };
+type ElGamalApi = {
+  randomPrivateKey(): bigint;
+  getPublicKey(privateKey: bigint): bigint;
+  encrypt(publicKey: bigint, message: bigint, nonce?: bigint): ElGamalCiphertext;
+  decrypt(privateKey: bigint, ciphertext: ElGamalCiphertext): bigint;
+  sign(privateKey: bigint, message: bigint, nonce?: bigint): ElGamalSignature;
+  verify(publicKey: bigint, message: bigint, sig: ElGamalSignature): boolean;
 };
 
 /**
@@ -37,18 +52,26 @@ export function genElGamalParams(bits: number): ElGamalParams {
   if (!Number.isSafeInteger(bits) || bits <= 0 || bits % 8 !== 0)
     throw new Error('number of bits should be positive integer aligned to byte boundary');
   // 512: 1s, 1024: 20s, 2048: 1046s
-  let p: bigint = 0n;
+  let p: bigint = _0n;
+  // Policy: `bits` is the width of random candidate material, not an exact
+  // mathematical bit-length promise for p. RFC 4880 5.5.2 / RFC 9580 5.5.5.3
+  // only define ElGamal key fields as "MPI of Elgamal prime p", "MPI of
+  // Elgamal group generator g", and "MPI of Elgamal public key value
+  // y (= g^x mod p where x is secret)"; they do not specify parameter
+  // generation or exact modulus-length semantics. Do not force the top bit
+  // here: leading-zero random draws are still `bits` random candidate bits,
+  // while conditioning on a leading 1 would change the candidate distribution.
   do p = bytesToNumber(randomBytes(bits / 8));
   while (!isProbablySafePrime(p, 10)); // NOTE: this is very slow!
-  const q = (p - 1n) >> 1n;
+  const q = (p - _1n) >> _1n;
   while (true) {
     // g=2 -> Bleichenbacher's attack
-    const g = randomBigInt(bits / 8, 3n, p);
-    if (pow(g, 2n, p) === 1n) continue;
-    if (pow(g, q, p) === 1n) continue;
-    if ((p - 1n) % g === 0n) continue;
+    const g = randomBigInt(bits / 8, _3n, p);
+    if (pow(g, _2n, p) === _1n) continue;
+    if (pow(g, q, p) === _1n) continue;
+    if ((p - _1n) % g === _0n) continue;
     const gInv = invert(g, p); // Khadir's attack
-    if ((p - 1n) % gInv === 0n) continue;
+    if ((p - _1n) % gInv === _0n) continue;
     return { p, g };
   }
 }
@@ -72,24 +95,31 @@ export function genElGamalParams(bits: number): ElGamalParams {
  * deepStrictEqual(elgamal.verify(alicePub, msg, elgamal.sign(alicePriv, msg, 3n)), true);
  * ```
  */
-export const ElGamal = (params: ElGamalParams) => {
+export const ElGamal = (params: ElGamalParams): ElGamalApi => {
   const { p, g } = params;
   if (typeof p !== 'bigint' || typeof g !== 'bigint') throw new Error('wrong params');
-  if (g <= 1n || g >= p) throw new Error('g should be in the range 1 < g < p');
-  const pBytes = p.toString(16).length / 2;
+  if (g <= _1n || g >= p) throw new Error('g should be in the range 1 < g < p');
+  // Odd-width moduli such as 257 need whole-octet random material; dividing
+  // hex length by 2 produces fractional byte lengths that randomBytes rejects.
+  const pBytes = getFieldBytesLength(p);
   return {
     randomPrivateKey(): bigint {
-      return randomBigInt(pBytes, 2n, p - 1n); // [2, p-1)
+      return randomBigInt(pBytes, _2n, p - _1n); // [2, p-1)
     },
     getPublicKey(privateKey: bigint): bigint {
       if (typeof privateKey !== 'bigint') throw new Error('privateKey should be bigint');
+      // Policy: RFC 4880 5.5.2 / RFC 9580 5.5.5.3 define ElGamal `y` as
+      // "g^x mod p where x is secret", and RFC 4880 5.5.3 / RFC 9580
+      // 5.5.5.3 only encode `x` as the "MPI of Elgamal secret exponent x".
+      // They do not set an exponent interval. Weak or predictable caller
+      // exponents such as 0, 1, or 2 are not treated as RFC-invalid here.
       return pow(g, privateKey, p);
     },
     encrypt(publicKey: bigint, message: bigint, nonce?: bigint): { ct1: bigint; ct2: bigint } {
       if (typeof publicKey !== 'bigint') throw new Error('publicKey should be bigint');
       if (typeof message !== 'bigint') throw new Error('wrong message');
-      if (nonce === undefined) nonce = randomBigInt(pBytes, 1n, p - 1n);
-      if (typeof nonce !== 'bigint' || nonce <= 0n || nonce >= p - 1n)
+      if (nonce === undefined) nonce = randomBigInt(pBytes, _1n, p - _1n);
+      if (typeof nonce !== 'bigint' || nonce <= _0n || nonce >= p - _1n)
         throw new Error(`invalid nonce=${nonce}`);
       const c1 = pow(g, nonce, p); // c1 = g^k mod p
       const yk = pow(publicKey, nonce, p); // c2 = m * (y^k mod p) mod p
@@ -111,18 +141,23 @@ export const ElGamal = (params: ElGamalParams) => {
       if (typeof privateKey !== 'bigint') throw new Error('privateKey should be bigint');
       if (typeof message !== 'bigint') throw new Error('wrong message');
       if (nonce === undefined) {
-        do nonce = randomBigInt(pBytes, 1n, p - 1n);
-        while (gcd(nonce, p - 1n) !== 1n); // there is no invert otherwise
+        do nonce = randomBigInt(pBytes, _1n, p - _1n);
+        while (gcd(nonce, p - _1n) !== _1n); // there is no invert otherwise
       }
-      if (typeof nonce !== 'bigint' || nonce <= 0n || nonce >= p - 1n)
+      if (typeof nonce !== 'bigint' || nonce <= _0n || nonce >= p - _1n)
         throw new Error(`invalid nonce=${nonce}`);
       const r = pow(g, nonce, p);
-      const kInv = invert(nonce, p - 1n);
-      const s = mod(kInv * (message - privateKey * r), p - 1n);
+      const kInv = invert(nonce, p - _1n);
+      const s = mod(kInv * (message - privateKey * r), p - _1n);
       return { r, s };
     },
     verify(publicKey: bigint, message: bigint, sig: { r: bigint; s: bigint }): boolean {
       if (typeof publicKey !== 'bigint') throw new Error('publicKey should be bigint');
+      // Policy: RFC 4880 5.5.2 / RFC 9580 5.5.5.3 define ElGamal `y` as
+      // "g^x mod p where x is secret"; RFC 2440 12.5 legacy signature
+      // guidance calls out `r` and `s` bounds, not a public-key interval.
+      // Weak or predictable caller-supplied public keys such as 1 are not
+      // treated as RFC-invalid here without an explicit OpenPGP rule.
       if (typeof sig.r !== 'bigint' || typeof sig.s !== 'bigint')
         throw new Error('invalid signature');
       const gH = pow(g, message, p);

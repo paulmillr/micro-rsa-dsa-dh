@@ -1,7 +1,21 @@
 import { describe, should } from '@paulmillr/jsbt/test.js';
-import { deepStrictEqual } from 'node:assert';
+import { deepStrictEqual, throws } from 'node:assert';
 import * as crypto from 'node:crypto';
-import { DH } from '../src/dh.ts';
+import { DH, DHGroups } from '../src/dh.ts';
+
+const toBytes = (n: bigint, len: number) => {
+  const hex = n.toString(16).padStart(len * 2, '0');
+  const out = new Uint8Array(len);
+  for (let i = 0; i < len; i++) out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
+};
+const toNumber = (bytes: Uint8Array) => bytes.reduce((acc, byte) => (acc << 8n) | BigInt(byte), 0n);
+const leftPad = (bytes: Uint8Array, len: number) => {
+  if (bytes.length > len) throw new Error('input is longer than target length');
+  const out = new Uint8Array(len);
+  out.set(bytes, len - bytes.length);
+  return out;
+};
 
 describe('DH', () => {
   should('Example', () => {
@@ -19,19 +33,65 @@ describe('DH', () => {
   should('pads public keys to fixed group length', () => {
     const nobleDH = DH('modp18');
     const privateKey = new Uint8Array(1024);
-    privateKey[1023] = 1;
+    privateKey[1023] = 2;
     const publicKey = nobleDH.getPublicKey(privateKey);
     deepStrictEqual(publicKey.length, 1024);
     deepStrictEqual(nobleDH.getSharedSecret(privateKey, publicKey).length, 1024);
   });
 
+  should('rejects caller-supplied private exponents outside the finite-field interval', () => {
+    const nobleDH = DH('modp14');
+    const p = DHGroups.modp14.p;
+    const len = p.toString(16).length / 2;
+    const publicKey = nobleDH.getPublicKey(toBytes(2n, len));
+    for (const privateKey of [0n, 1n, p - 1n, p])
+      for (const op of [
+        () => nobleDH.getPublicKey(toBytes(privateKey, len)),
+        () => nobleDH.getSharedSecret(toBytes(privateKey, len), publicKey),
+      ])
+        throws(op, { name: 'Error' });
+  });
+
+  should('rejects peer public keys outside the finite-field interval', () => {
+    const nobleDH = DH('modp14');
+    const p = DHGroups.modp14.p;
+    const len = p.toString(16).length / 2;
+    const privateKey = toBytes(2n, len);
+    for (const publicKey of [0n, 1n, p - 1n, p])
+      throws(() => nobleDH.getSharedSecret(privateKey, toBytes(publicKey, len)), { name: 'Error' });
+  });
+
+  should('generates private exponents inside the finite-field interval', () => {
+    const saved = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        getRandomValues(arr: Uint8Array) {
+          arr.fill(0);
+          return arr;
+        },
+      },
+    });
+    try {
+      const nobleDH = DH('modp14');
+      const p = DHGroups.modp14.p;
+      const key = nobleDH.randomPrivateKey();
+      deepStrictEqual(toNumber(key) >= 2n && toNumber(key) <= p - 2n, true);
+      deepStrictEqual(nobleDH.getPublicKey(key).length, p.toString(16).length / 2);
+    } finally {
+      if (saved) Object.defineProperty(globalThis, 'crypto', saved);
+    }
+  });
+
   should('Basic', () => {
     if (process.versions.deno || process.versions.bun) return;
-    const getNodeDH = (privateKey, group) => {
+    const getNodeDH = (privateKey, group, bytesLen) => {
       const dhg = crypto.createDiffieHellmanGroup(group);
       const dh = crypto.createDiffieHellman(dhg.getPrime(), dhg.getGenerator());
       dh.setPrivateKey(privateKey);
-      const pub = Uint8Array.from(dh.generateKeys());
+      // Node encodes DH public keys as minimal positive integers; this package returns
+      // fixed-width field elements so leading-zero keys still round-trip into shared-secret derivation.
+      const pub = leftPad(Uint8Array.from(dh.generateKeys()), bytesLen);
       const priv = dh.getPrivateKey();
       return { dh, pub, priv };
     };
@@ -70,15 +130,24 @@ describe('DH', () => {
       const nobleDH = DH(group);
       const aliceNoble = nobleDH.randomPrivateKey();
       const bobNoble = nobleDH.randomPrivateKey();
+      const bytesLen = DHGroups[group].p.toString(16).length / 2;
       // Example usage
-      const aliceDH = getNodeDH(aliceNoble, group);
+      const aliceDH = getNodeDH(aliceNoble, group, bytesLen);
       console.log('DH', aliceDH);
-      const bobDH = getNodeDH(bobNoble, group);
+      const bobDH = getNodeDH(bobNoble, group, bytesLen);
       deepStrictEqual(nobleDH.getPublicKey(aliceNoble), aliceDH.pub);
       deepStrictEqual(nobleDH.getPublicKey(bobNoble), bobDH.pub);
 
-      const aliceSecret = Uint8Array.from(aliceDH.dh.computeSecret(Buffer.from(bobDH.pub, 'hex')));
-      const bobSecret = Uint8Array.from(bobDH.dh.computeSecret(Buffer.from(aliceDH.pub, 'hex')));
+      // Node encodes DH secrets as minimal positive integers; this package returns
+      // fixed-width field elements so leading-zero secrets still round-trip as keys.
+      const aliceSecret = leftPad(
+        Uint8Array.from(aliceDH.dh.computeSecret(Buffer.from(bobDH.pub, 'hex'))),
+        bytesLen
+      );
+      const bobSecret = leftPad(
+        Uint8Array.from(bobDH.dh.computeSecret(Buffer.from(aliceDH.pub, 'hex'))),
+        bytesLen
+      );
       deepStrictEqual(aliceSecret, bobSecret);
 
       deepStrictEqual(

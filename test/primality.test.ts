@@ -4,12 +4,19 @@ import * as primality from '../src/primality.ts';
 import { IFCPrimes } from '../src/rsa.ts';
 import {
   I2OSP,
+  OS2IP,
   ensureBytes,
   gcd,
   getFieldBytesLength,
+  getMinHashLength,
   hexToNumber,
+  invert,
   mapHashToField,
+  mod,
+  numberToBytesBE,
+  numberToVarBytesBE,
   pow,
+  randomBits,
   sqrt,
 } from '../src/utils.ts';
 import { jsonGZ, parseTestFile } from './utils.ts';
@@ -73,6 +80,7 @@ describe('primality', () => {
   });
 
   should('sqrt', () => {
+    deepStrictEqual(sqrt(0n), 0n);
     deepStrictEqual(sqrt(1n), 1n);
     deepStrictEqual(sqrt(2n), 1n);
     deepStrictEqual(sqrt(3n), 1n);
@@ -98,11 +106,108 @@ describe('primality', () => {
     throws(() => ensureBytes('msg', 1 as any), { name: 'TypeError' });
     throws(() => ensureBytes('msg', 'zz'), { name: 'RangeError' });
     throws(() => ensureBytes('msg', Uint8Array.of(1), 2), { name: 'RangeError' });
+    throws(() => I2OSP(-1n, 1), { name: 'RangeError' });
     throws(() => I2OSP(256n, 1), { name: 'RangeError' });
+    throws(() => OS2IP(Int8Array.of(-1) as any), { name: 'TypeError' });
+    throws(() => pow(-2n, 3n, 11n), { name: 'RangeError' });
     throws(() => pow(2n, -1n, 11n), { name: 'RangeError' });
+    throws(() => mod(1n, -11n), { name: 'RangeError' });
+    throws(() => invert(1n, 1n), { name: 'RangeError' });
     throws(() => hexToNumber(1 as any), { name: 'TypeError' });
     throws(() => getFieldBytesLength(1 as any), { name: 'TypeError' });
     throws(() => mapHashToField(new Uint8Array(1), 23n), { name: 'RangeError' });
+  });
+
+  should('randomBits validates bit lengths before randomness', () => {
+    const calls: number[] = [];
+    const rand = (bytes: number) => {
+      calls.push(bytes);
+      return Uint8Array.of(0);
+    };
+    for (const bits of [0, 1.5, -1, Number.NaN, Number.POSITIVE_INFINITY])
+      throws(() => randomBits(bits, rand), { name: 'RangeError' });
+    deepStrictEqual(calls, []);
+    deepStrictEqual(randomBits(8, rand), 0n);
+    deepStrictEqual(calls, [1]);
+  });
+
+  should('numberToBytesBE and numberToVarBytesBE split fixed and variable encodings', () => {
+    deepStrictEqual(numberToBytesBE(255n, 1), Uint8Array.of(0xff));
+    deepStrictEqual(numberToBytesBE(256n, 2), Uint8Array.of(0x01, 0x00));
+    throws(() => numberToBytesBE(256n, 1), { name: 'RangeError' });
+    throws(() => numberToBytesBE(0n, 0), { name: 'RangeError' });
+    deepStrictEqual(numberToVarBytesBE(0n), Uint8Array.of(0));
+    deepStrictEqual(numberToVarBytesBE(256n), Uint8Array.of(0x01, 0x00));
+    throws(() => numberToVarBytesBE(-1n), { name: 'RangeError' });
+  });
+
+  should('mapHashToField respects explicit scalar lower bounds', () => {
+    const key = new Uint8Array(Math.max(16, getMinHashLength(23n)));
+    deepStrictEqual(mapHashToField(key, 23n), Uint8Array.of(1));
+    deepStrictEqual(mapHashToField(key, 23n, 2n), Uint8Array.of(2));
+    throws(() => mapHashToField(key, 3n, 2n), {
+      name: 'RangeError',
+    });
+  });
+
+  should('field-order helpers follow the noble-curves scalar-range width', () => {
+    const orders = [255n, 256n, 257n, 65535n, 65536n].map((fieldOrder) => ({
+      fieldOrder,
+      bytes: getFieldBytesLength(fieldOrder),
+      minHash: getMinHashLength(fieldOrder),
+    }));
+    deepStrictEqual(orders, [
+      { fieldOrder: 255n, bytes: 1, minHash: 2 },
+      { fieldOrder: 256n, bytes: 1, minHash: 2 },
+      { fieldOrder: 257n, bytes: 2, minHash: 3 },
+      { fieldOrder: 65535n, bytes: 2, minHash: 3 },
+      { fieldOrder: 65536n, bytes: 2, minHash: 3 },
+    ]);
+    const key = new Uint8Array(16).fill(1);
+    const mapped = [255n, 256n, 257n].map((fieldOrder) => ({
+      fieldOrder,
+      value: mapHashToField(key, fieldOrder),
+    }));
+    deepStrictEqual(mapped, [
+      { fieldOrder: 255n, value: Uint8Array.of(0x04) },
+      { fieldOrder: 256n, value: Uint8Array.of(0x11) },
+      { fieldOrder: 257n, value: Uint8Array.of(0x00, 0x02) },
+    ]);
+    for (const fieldOrder of [1n, 0n, -1n]) {
+      throws(() => getFieldBytesLength(fieldOrder), { name: 'RangeError' });
+      throws(() => getMinHashLength(fieldOrder), { name: 'RangeError' });
+      throws(() => mapHashToField(key, fieldOrder), { name: 'RangeError' });
+    }
+  });
+
+  should('rejects zero Miller-Rabin iterations', () => {
+    const rand = () => Uint8Array.of(0, 2);
+    throws(() => primality.millerRabin(1009n, 0, rand), /iterations/i);
+    throws(() => primality.isProbablePrime(1009n, 0, rand), /iterations/i);
+    throws(() => primality.isProbablySafePrime(2027n, 0, rand), /iterations/i);
+    deepStrictEqual(primality.millerRabin(1009n, 1, rand), true);
+  });
+
+  should('rejects Miller-Rabin candidates without valid random bases', () => {
+    const rand = () => Uint8Array.of(0);
+    throws(() => primality.millerRabin(2n, 1, rand), /base interval/i);
+    throws(() => primality.millerRabin(3n, 1, rand), /base interval/i);
+    deepStrictEqual(primality.isProbablePrime(3n, 1, rand), true);
+  });
+
+  should('rejects fixed Miller-Rabin bases outside the FIPS interval', () => {
+    throws(() => primality.millerRabinBaseTest(23n, 34n), /base/i);
+    throws(() => primality.millerRabinBaseTest(23n, 1n), /base/i);
+    throws(() => primality.millerRabinBaseTest(23n, 22n), /base/i);
+    throws(() => primality.millerRabinBaseTest(23n, 23n), /base/i);
+    deepStrictEqual(primality.millerRabinBaseTest(23n, 2n), true);
+    deepStrictEqual(primality.millerRabinBaseTest(23n, 21n), true);
+  });
+
+  should('lucas handles small nonsquares without perfect-square oscillation', () => {
+    deepStrictEqual(primality.lucas(3n), true);
+    deepStrictEqual(primality.lucas(7n), true);
+    deepStrictEqual(primality.lucas(9n), false);
   });
 
   should('Jacobi', () => {

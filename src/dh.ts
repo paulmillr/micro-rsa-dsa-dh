@@ -5,9 +5,14 @@ import {
   getFieldBytesLength,
   getMinHashLength,
   mapHashToField,
-  numberToBytes,
+  numberToBytesBE,
   pow,
+  type TArg,
+  type TRet,
 } from './utils.ts';
+
+const _1n = /* @__PURE__ */ BigInt(1);
+const _2n = /* @__PURE__ */ BigInt(2);
 
 /** Classic finite-field Diffie-Hellman group parameters. */
 export type DHGroup = {
@@ -17,8 +22,17 @@ export type DHGroup = {
   g: bigint;
 };
 
+const group = (p: bigint, g: bigint): Readonly<DHGroup> => /* @__PURE__ */ Object.freeze({ p, g });
+type DHApi = {
+  randomPrivateKey(): Uint8Array;
+  getPublicKey(privateKey: Uint8Array): Uint8Array;
+  getSharedSecret(privateA: Uint8Array, publicB: Uint8Array): Uint8Array;
+};
+
 /**
  * Built-in MODP groups keyed by their short names.
+ * RFC 2412 Appendix E and RFC 3526 §§3-7: these property names follow
+ * the Oakley/IKE group numbers for the published MODP parameters.
  * @example
  * Pick one of the built-in MODP groups before deriving keys.
  * ```ts
@@ -29,18 +43,18 @@ export type DHGroup = {
  * privateKey;
  * ```
  */
-export const DHGroups: Record<string, DHGroup> = {
-  modp1: {
-    p: BigInt(
+export const DHGroups: Readonly<Record<string, Readonly<DHGroup>>> = /* @__PURE__ */ Object.freeze({
+  modp1: group(
+    BigInt(
       '0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd1' +
         '29024e088a67cc74020bbea63b139b22514a08798e3404dd' +
         'ef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245' +
         'e485b576625e7ec6f44c42e9a63a3620ffffffffffffffff'
     ),
-    g: 2n,
-  },
-  modp2: {
-    p: BigInt(
+    _2n
+  ),
+  modp2: group(
+    BigInt(
       '0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd1' +
         '29024e088a67cc74020bbea63b139b22514a08798e3404dd' +
         'ef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245' +
@@ -48,10 +62,10 @@ export const DHGroups: Record<string, DHGroup> = {
         'ee386bfb5a899fa5ae9f24117c4b1fe649286651ece65381' +
         'ffffffffffffffff'
     ),
-    g: 2n,
-  },
-  modp5: {
-    p: BigInt(
+    _2n
+  ),
+  modp5: group(
+    BigInt(
       '0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd1' +
         '29024e088a67cc74020bbea63b139b22514a08798e3404dd' +
         'ef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245' +
@@ -61,10 +75,10 @@ export const DHGroups: Record<string, DHGroup> = {
         '83655d23dca3ad961c62f356208552bb9ed529077096966d' +
         '670c354e4abc9804f1746c08ca237327ffffffffffffffff'
     ),
-    g: 2n,
-  },
-  modp14: {
-    p: BigInt(
+    _2n
+  ),
+  modp14: group(
+    BigInt(
       '0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd1' +
         '29024e088a67cc74020bbea63b139b22514a08798e3404dd' +
         'ef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245' +
@@ -77,10 +91,10 @@ export const DHGroups: Record<string, DHGroup> = {
         'de2bcbf6955817183995497cea956ae515d2261898fa0510' +
         '15728e5a8aacaa68ffffffffffffffff'
     ),
-    g: 2n,
-  },
-  modp15: {
-    p: BigInt(
+    _2n
+  ),
+  modp15: group(
+    BigInt(
       '0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd1' +
         '29024e088a67cc74020bbea63b139b22514a08798e3404dd' +
         'ef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245' +
@@ -98,10 +112,10 @@ export const DHGroups: Record<string, DHGroup> = {
         'bbe117577a615d6c770988c0bad946e208e24fa074e5ab31' +
         '43db5bfce0fd108e4b82d120a93ad2caffffffffffffffff'
     ),
-    g: 2n,
-  },
-  modp16: {
-    p: BigInt(
+    _2n
+  ),
+  modp16: group(
+    BigInt(
       '0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd1' +
         '29024e088a67cc74020bbea63b139b22514a08798e3404dd' +
         'ef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245' +
@@ -125,10 +139,10 @@ export const DHGroups: Record<string, DHGroup> = {
         '93b4ea988d8fddc186ffb7dc90a6c08f4df435c934063199' +
         'ffffffffffffffff'
     ),
-    g: 2n,
-  },
-  modp17: {
-    p: BigInt(
+    _2n
+  ),
+  modp17: group(
+    BigInt(
       '0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd1' +
         '29024e088a67cc74020bbea63b139b22514a08798e3404dd' +
         'ef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245' +
@@ -162,10 +176,10 @@ export const DHGroups: Record<string, DHGroup> = {
         'da56c9ec2ef29632387fe8d76e3c0468043e8f663f4860ee' +
         '12bf2d5b0b7474d6e694f91e6dcc4024ffffffffffffffff'
     ),
-    g: 2n,
-  },
-  modp18: {
-    p: BigInt(
+    _2n
+  ),
+  modp18: group(
+    BigInt(
       '0xffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd1' +
         '29024e088a67cc74020bbea63b139b22514a08798e3404dd' +
         'ef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245' +
@@ -211,9 +225,9 @@ export const DHGroups: Record<string, DHGroup> = {
         '4dfc81f56e880b96e7160c980dd98edd3dfffffffffffff' +
         'ffff'
     ),
-    g: 2n,
-  },
-};
+    _2n
+  ),
+});
 
 /**
  * Basic Diffie Hellman implementation with focus on simplicity.
@@ -223,7 +237,7 @@ export const DHGroups: Record<string, DHGroup> = {
  * but if re-key happens often it could be slow.
  * @param group - Built-in MODP group name or explicit `{ p, g }` parameters.
  * @returns Diffie-Hellman helpers for key generation and shared-secret derivation.
- * @throws If the group selector is unknown or the supplied group parameters are invalid. {@link Error}
+ * @throws If the group selector or supplied group parameters are invalid. {@link Error}
  * @example
  * Derive the same shared secret on both sides of a toy DH group.
  * ```ts
@@ -237,35 +251,50 @@ export const DHGroups: Record<string, DHGroup> = {
  * deepStrictEqual(dh.getSharedSecret(alice, bobPub), dh.getSharedSecret(bob, alicePub));
  * ```
  */
-export const DH = (
-  group: keyof DHGroup | DHGroup
-): {
-  randomPrivateKey(): Uint8Array;
-  getPublicKey(privateKey: Uint8Array): Uint8Array;
-  getSharedSecret(privateA: Uint8Array, publicB: Uint8Array): Uint8Array;
-} => {
+export const DH = (group: keyof DHGroup | DHGroup): TRet<DHApi> => {
   if (typeof group === 'string')
     group = (DHGroups as Record<string, DHGroup>)[group as keyof DHGroup];
   if (!group) throw new Error('DH: wrong group');
   const { p, g } = group;
   if (typeof p !== 'bigint' || typeof g !== 'bigint') throw new Error('DH: wrong group params');
   const bytesLen = getFieldBytesLength(p);
+  const privateKeyNum = (key: TArg<Uint8Array>) => {
+    const priv = bytesToNumber(ensureBytes('private key', key, bytesLen));
+    // RFC 7919 §5.2: FFDHE peers choose a "secret exponent from the range [2, p-2]".
+    // RFC 2785 §1.2 and RFC 2631 §2.1.5 use [2, q-2] for X9.42 groups; this p/g-only API
+    // enforces the generic finite-field endpoint guard before exponentiation.
+    // Node crypto accepts private exponent 1 here, but this helper follows
+    // the RFC interval more strictly.
+    if (priv < _2n || priv > p - _2n) throw new Error('DH: invalid private key');
+    return priv;
+  };
+  const publicKeyNum = (key: TArg<Uint8Array>) => {
+    const pub = bytesToNumber(ensureBytes('public key', key, bytesLen));
+    // RFC 7919 §5.1: FFDHE peers MUST validate public keys with "1 < Y < p-1".
+    // RFC 2631 §2.1.5 and RFC 2785 §3.1 also reject received public keys outside [2, p-1];
+    // excluding p-1 follows the stricter FFDHE endpoint check and matches Node crypto.
+    if (pub < _2n || pub >= p - _1n) throw new Error('DH: invalid public key');
+    return pub;
+  };
   return {
-    randomPrivateKey(): Uint8Array {
-      return mapHashToField(randomBytes(getMinHashLength(p)), p);
+    randomPrivateKey(): TRet<Uint8Array> {
+      // RFC 7919 §5.2: FFDHE peers choose a "secret exponent from the range [2, p-2]".
+      // RFC 2785 §1.2 and RFC 2631 §2.1.5 use [2, q-2] for X9.42 private keys;
+      // this p/g-only API maps generated exponents into the same endpoint-excluding shape.
+      return mapHashToField(randomBytes(getMinHashLength(p)), p, _2n);
     },
-    getPublicKey(privateKey: Uint8Array): Uint8Array {
-      const privNum = bytesToNumber(ensureBytes('private key', privateKey, bytesLen));
+    getPublicKey(privateKey: TArg<Uint8Array>): TRet<Uint8Array> {
+      const privNum = privateKeyNum(privateKey);
       const n = pow(g, privNum, p); // g^privateKey mod p
       // Public keys must stay fixed-width so they can round-trip into getSharedSecret()
       // even when the modular exponentiation result has leading zero bytes.
-      return numberToBytes(n, bytesLen);
+      return numberToBytesBE(n, bytesLen);
     },
-    getSharedSecret(privateA: Uint8Array, publicB: Uint8Array): Uint8Array {
-      const privNum = bytesToNumber(ensureBytes('private key', privateA, bytesLen));
-      const pubNum = bytesToNumber(ensureBytes('public key', publicB, bytesLen));
+    getSharedSecret(privateA: TArg<Uint8Array>, publicB: TArg<Uint8Array>): TRet<Uint8Array> {
+      const privNum = privateKeyNum(privateA);
+      const pubNum = publicKeyNum(publicB);
       const n = pow(pubNum, privNum, p); // publicB^privateA mod p
-      return numberToBytes(n, bytesLen);
+      return numberToBytesBE(n, bytesLen);
     },
   };
 };

@@ -1,13 +1,22 @@
 /*! micro-rsa-dsa-dh - MIT License (c) 2024 Paul Miller (paulmillr.com) */
-import { bytesToHex, hexToBytes, randomBytes } from '@noble/hashes/utils.js';
+import { type TArg, type TRet } from '@noble/hashes/utils.js';
+import {
+  abytes,
+  anumber,
+  bytesToHex,
+  hexToBytes,
+  isBytes,
+  randomBytes,
+} from '@noble/hashes/utils.js';
+export { type TArg, type TRet } from '@noble/hashes/utils.js';
 
 /** Secure PRNG function like `randomBytes()` from `@noble/hashes/utils`. */
-export type RandFn = (bytes: number) => Uint8Array;
+export type RandFn = (bytes: number) => TRet<Uint8Array>;
 
 /** Hash function with noble-style metadata and incremental API. */
 export type Hash = {
   /** Hash one message in a single call. */
-  (message: Uint8Array): Uint8Array;
+  (message: TArg<Uint8Array>): TRet<Uint8Array>;
   /** Digest size in bytes. */
   outputLen: number;
   /** Internal compression block size in bytes. */
@@ -22,8 +31,18 @@ export type Hash = {
 /** Hex input accepted by this package. */
 export type Hex = Uint8Array | string; // hex strings are accepted for simplicity
 
-function isBytes(a: unknown): a is Uint8Array {
-  return a instanceof Uint8Array || (ArrayBuffer.isView(a) && a.constructor.name === 'Uint8Array');
+const _0n = /* @__PURE__ */ BigInt(0);
+const _1n = /* @__PURE__ */ BigInt(1);
+const _2n = /* @__PURE__ */ BigInt(2);
+const _8n = /* @__PURE__ */ BigInt(8);
+const _0xffn = /* @__PURE__ */ BigInt(0xff);
+const _256n = /* @__PURE__ */ BigInt(256);
+const isPosBig = (n: bigint) => typeof n === 'bigint' && _0n <= n;
+function abignumber(n: number | bigint) {
+  if (typeof n === 'bigint') {
+    if (!isPosBig(n)) throw new RangeError('positive bigint expected, got ' + n);
+  } else anumber(n);
+  return n;
 }
 
 /**
@@ -43,7 +62,11 @@ function isBytes(a: unknown): a is Uint8Array {
  * ensureBytes('msg', '0a0b');
  * ```
  */
-export function ensureBytes(title: string, hex: Hex, expectedLength?: number): Uint8Array {
+export function ensureBytes(
+  title: string,
+  hex: TArg<Hex>,
+  expectedLength?: number
+): TRet<Uint8Array> {
   let res: Uint8Array;
   if (typeof hex === 'string') {
     try {
@@ -55,6 +78,11 @@ export function ensureBytes(title: string, hex: Hex, expectedLength?: number): U
   } else if (isBytes(hex)) {
     // Uint8Array.from() instead of hash.slice() because node.js Buffer
     // is instance of Uint8Array, and its slice() creates **mutable** copy
+    // Uint8Array.from() also guarantees a plain byte copy, so Buffer-backed
+    // views cannot keep aliasing caller-owned memory after normalization.
+    // Policy: use the exact noble-curves/noble-hashes isBytes semantics for
+    // compatibility. Prototype-only spoofing can still reach this copy step
+    // and be rejected by the native typed-array brand check.
     res = Uint8Array.from(hex);
   } else {
     throw new TypeError(`${title} must be hex string or Uint8Array`);
@@ -62,7 +90,7 @@ export function ensureBytes(title: string, hex: Hex, expectedLength?: number): U
   const len = res.length;
   if (typeof expectedLength === 'number' && len !== expectedLength)
     throw new RangeError(`${title} expected ${expectedLength} bytes, got ${len}`);
-  return res;
+  return res as TRet<Uint8Array>;
 }
 
 /**
@@ -79,14 +107,17 @@ export function ensureBytes(title: string, hex: Hex, expectedLength?: number): U
  * I2OSP(258n, 2);
  * ```
  */
-export function I2OSP(x: bigint, xLen: number): Uint8Array {
-  if (x >= 256n ** BigInt(xLen)) throw new RangeError('integer too large');
+export function I2OSP(x: bigint, xLen: number): TRet<Uint8Array> {
+  // RFC 8017 §4.1 defines `x` as a "nonnegative integer to be converted";
+  // step 1 separately rejects values that exceed the requested octet length.
+  if (x < _0n) throw new RangeError('integer must be nonnegative');
+  if (x >= _256n ** BigInt(xLen)) throw new RangeError('integer too large');
   const res = new Uint8Array(xLen);
   for (let i = xLen - 1; i >= 0; i--) {
-    res[i] = Number(x & 0xffn);
-    x >>= 8n;
+    res[i] = Number(x & _0xffn);
+    x >>= _8n;
   }
-  return res;
+  return res as TRet<Uint8Array>;
 }
 
 /**
@@ -101,20 +132,23 @@ export function I2OSP(x: bigint, xLen: number): Uint8Array {
  * OS2IP(Uint8Array.from([1, 2]));
  * ```
  */
-export function OS2IP(X: Uint8Array): bigint {
-  let x = 0n;
-  for (let i = 0; i < X.length; i++) x = (x << 8n) + BigInt(X[i]);
+export function OS2IP(X: TArg<Uint8Array>): bigint {
+  // RFC 8017 §4.2 takes an octet string `X`; use the noble-hashes byte assertion
+  // so non-octet typed arrays cannot feed negative or wider-than-octet values here.
+  X = abytes(X, undefined, 'OS2IP');
+  let x = _0n;
+  for (let i = 0; i < X.length; i++) x = (x << _8n) + BigInt(X[i]);
   return x;
 }
 
 /**
  * Efficiently raise num to power and do modular division.
  * Unsafe in some contexts: uses ladder, so can expose bigint bits.
- * @param num - Base value.
+ * @param num - Non-negative base value.
  * @param power - Non-negative exponent.
  * @param modulo - Positive modulus.
  * @returns `num ** power mod modulo`.
- * @throws On negative powers or non-positive moduli. {@link RangeError}
+ * @throws On negative bases, negative powers, or non-positive moduli. {@link RangeError}
  * @example
  * Modular exponentiation used by RSA, DSA, and DH math.
  * ```ts
@@ -123,13 +157,17 @@ export function OS2IP(X: Uint8Array): bigint {
  * ```
  */
 export function pow(num: bigint, power: bigint, modulo: bigint): bigint {
-  if (modulo <= 0n || power < 0n) throw new RangeError('Expected power/modulo > 0');
-  if (modulo === 1n) return 0n;
-  let res = 1n;
-  while (power > 0n) {
-    if (power & 1n) res = (res * num) % modulo;
+  if (num < _0n || power < _0n || modulo <= _0n)
+    throw new RangeError('Expected non-negative base/power and positive modulo');
+  if (modulo === _1n) return _0n;
+  // RFC 8017 RSA representatives are in [0, n - 1], and FIPS 186-5 B.3.1
+  // Miller-Rabin bases satisfy 1 < b < w - 1; reject negative bases instead
+  // of silently normalizing values outside those caller domains.
+  let res = _1n;
+  while (power > _0n) {
+    if (power & _1n) res = (res * num) % modulo;
     num = (num * num) % modulo;
-    power >>= 1n;
+    power >>= _1n;
   }
   return res;
 }
@@ -139,6 +177,7 @@ export function pow(num: bigint, power: bigint, modulo: bigint): bigint {
  * @param a - Dividend.
  * @param b - Positive modulus.
  * @returns Remainder in the range `[0, b)`.
+ * @throws On wrong argument ranges or values. {@link RangeError}
  * @example
  * Keep a modulo result positive even for negative dividends.
  * ```ts
@@ -147,8 +186,11 @@ export function pow(num: bigint, power: bigint, modulo: bigint): bigint {
  * ```
  */
 export function mod(a: bigint, b: bigint): bigint {
+  // The documented `[0, b)` range and all FIPS/RFC group-order callers require
+  // a positive modulus; negative moduli make that range meaningless.
+  if (b <= _0n) throw new RangeError('mod: expected positive modulus');
   const result = a % b;
-  return result >= 0n ? result : b + result;
+  return result >= _0n ? result : b + result;
 }
 
 /**
@@ -164,13 +206,13 @@ export function mod(a: bigint, b: bigint): bigint {
  * ```
  */
 export function gcd(a: bigint, b: bigint): bigint {
-  while (b !== 0n) {
+  while (b !== _0n) {
     let t = b;
     b = a % b;
     a = t;
   }
-  // NOTE: GCD cannot be negative! it is greatest divisior and 1 is always greater than any negative number
-  return a < 0n ? -a : a;
+  // NOTE: GCD cannot be negative: 1 is always greater than any negative divisor.
+  return a < _0n ? -a : a;
 }
 
 /**
@@ -188,15 +230,19 @@ export function gcd(a: bigint, b: bigint): bigint {
  * ```
  */
 export function invert(number: bigint, modulo: bigint): bigint {
-  if (number === 0n || modulo <= 0n)
-    throw new RangeError(`invert: expected positive integers, got n=${number} mod=${modulo}`);
+  // FIPS 186-5 Appendix B.1 requires the modulus to be a positive integer
+  // greater than 1; `modulo = 1` has no multiplicative inverse domain.
+  if (number === _0n || modulo <= _1n)
+    throw new RangeError(
+      `invert: expected non-zero number and modulus greater than 1, got n=${number} mod=${modulo}`
+    );
   // Euclidean GCD https://brilliant.org/wiki/extended-euclidean-algorithm/
   // Fermat's little theorem "CT-like" version inv(n) = n^(m-2) mod m is 30x slower.
   let a = mod(number, modulo);
   let b = modulo;
   // prettier-ignore
-  let x = 0n, y = 1n, u = 1n, v = 0n;
-  while (a !== 0n) {
+  let x = _0n, y = _1n, u = _1n, v = _0n;
+  while (a !== _0n) {
     // JIT applies optimization if those two lines follow each other
     const q = b / a;
     const r = b % a;
@@ -206,7 +252,7 @@ export function invert(number: bigint, modulo: bigint): bigint {
     b = a, a = r, x = u, y = v, u = m, v = n;
   }
   const gcd = b;
-  if (gcd !== 1n) throw new Error('invert: does not exist');
+  if (gcd !== _1n) throw new Error('invert: does not exist');
   return mod(x, modulo);
 }
 
@@ -229,12 +275,14 @@ export function invert(number: bigint, modulo: bigint): bigint {
  * ```
  */
 export function sqrt(n: bigint): bigint {
-  if (n < 0n) throw new RangeError('sqrt: input must be a non-negative bigint');
-  if (n === 1n) return n;
-  let b: bigint = 1n << BigInt(2 * n.toString().length);
-  for (let a: bigint = (n / b + b) >> 1n; b !== a && b !== a - 1n; ) {
+  if (n < _0n) throw new RangeError('sqrt: input must be a non-negative bigint');
+  // The integer square-root contract includes zero: 0 is the largest b with
+  // b * b <= 0. Return before Newton iteration so it cannot divide by zero.
+  if (n <= _1n) return n;
+  let b: bigint = _1n << BigInt(2 * n.toString().length);
+  for (let a: bigint = (n / b + b) >> _1n; b !== a && b !== a - _1n; ) {
     b = a;
-    a = (n / b + b) >> 1n;
+    a = (n / b + b) >> _1n;
   }
   return b;
 }
@@ -247,6 +295,7 @@ export function sqrt(n: bigint): bigint {
  * @param bits - The desired number of bits in the generated bigint.
  * @param randFn - Secure PRNG function used to generate random bytes.
  * @returns A random bigint with the specified number of bits, in big-endian format.
+ * @throws On wrong argument ranges or values. {@link RangeError}
  * @example
  * Draw a fresh random bigint with a specific bit length.
  * ```ts
@@ -254,10 +303,14 @@ export function sqrt(n: bigint): bigint {
  * randomBits(128);
  * ```
  */
-export function randomBits(bits: number, randFn: RandFn = randomBytes): bigint {
+export function randomBits(bits: number, randFn: TArg<RandFn> = randomBytes): bigint {
+  // Downstream FIPS callers use integer bit lengths for Miller-Rabin bases and
+  // RSA prime candidates; reject invalid public helper inputs before RNG reads.
+  if (!Number.isSafeInteger(bits) || bits <= 0)
+    throw new RangeError('randomBits: expected positive safe integer bits');
   const bytes = Math.ceil(bits / 8);
   const n = BigInt('0x' + bytesToHex(randFn(bytes)));
-  return n & ((1n << BigInt(bits)) - 1n); // Strip the leftmost bits by masking the number
+  return n & ((_1n << BigInt(bits)) - _1n); // Strip the leftmost bits by masking the number
 }
 
 /**
@@ -279,22 +332,54 @@ export function hexToNumber(hex: string): bigint {
 }
 
 /**
- * Converts a number to a big-endian byte array.
- * @param n - Number to encode.
- * @param len - Optional output length in bytes.
- * @returns Byte representation of `n`.
+ * Encodes a bigint into even-length big-endian hex.
+ * @param num - Number to encode.
+ * @returns Big-endian hex string.
+ * @throws On wrong argument ranges or values. {@link RangeError}
  * @example
- * Encode a bigint into its big-endian byte representation.
+ * Encode a scalar into hex without a `0x` prefix.
  * ```ts
- * import { numberToBytes } from 'micro-rsa-dsa-dh/utils.js';
- * numberToBytes(258n, 2);
+ * numberToHexUnpadded(255n);
  * ```
  */
-export function numberToBytes(n: number | bigint, len?: number): Uint8Array {
-  let hex = n.toString(16);
-  if (len) hex = hex.padStart(len * 2, '0');
-  if (hex.length & 1) hex = `0${hex}`;
-  return hexToBytes(hex);
+export function numberToHexUnpadded(num: number | bigint): string {
+  const hex = abignumber(num).toString(16);
+  return hex.length & 1 ? '0' + hex : hex;
+}
+
+/**
+ * Encodes a bigint into fixed-length big-endian bytes.
+ * @param n - Number to encode.
+ * @param len - Output length in bytes.
+ * @returns Big-endian byte array.
+ * @throws On wrong argument ranges or values. {@link RangeError}
+ * @example
+ * Serialize a scalar into a 32-byte field element.
+ * ```ts
+ * numberToBytesBE(255n, 2);
+ * ```
+ */
+export function numberToBytesBE(n: number | bigint, len: number): TRet<Uint8Array> {
+  anumber(len);
+  n = abignumber(n);
+  const res = hexToBytes(n.toString(16).padStart(len * 2, '0'));
+  if (res.length !== len) throw new RangeError('number too large');
+  return res as TRet<Uint8Array>;
+}
+
+/**
+ * Encodes a bigint into variable-length big-endian bytes.
+ * @param n - Number to encode.
+ * @returns Variable-length big-endian bytes.
+ * @throws On wrong argument ranges or values. {@link RangeError}
+ * @example
+ * Serialize a bigint without fixed-width padding.
+ * ```ts
+ * numberToVarBytesBE(255n);
+ * ```
+ */
+export function numberToVarBytesBE(n: number | bigint): TRet<Uint8Array> {
+  return hexToBytes(numberToHexUnpadded(abignumber(n))) as TRet<Uint8Array>;
 }
 
 /**
@@ -309,7 +394,7 @@ export function numberToBytes(n: number | bigint, len?: number): Uint8Array {
  * bytesToNumber(Uint8Array.from([1, 2]));
  * ```
  */
-export function bytesToNumber(bytes: Uint8Array): bigint {
+export function bytesToNumber(bytes: TArg<Uint8Array>): bigint {
   return hexToNumber(bytesToHex(bytes));
 }
 
@@ -318,6 +403,7 @@ export function bytesToNumber(bytes: Uint8Array): bigint {
  * @param fieldOrder - Field order or modulus.
  * @returns Byte length needed to encode values below `fieldOrder`.
  * @throws On wrong field-order input types. {@link TypeError}
+ * @throws On wrong argument ranges or values. {@link RangeError}
  * @example
  * Work out how many bytes are needed for elements below a modulus.
  * ```ts
@@ -327,7 +413,10 @@ export function bytesToNumber(bytes: Uint8Array): bigint {
  */
 export function getFieldBytesLength(fieldOrder: bigint): number {
   if (typeof fieldOrder !== 'bigint') throw new TypeError('field order must be bigint');
-  const bitLength = fieldOrder.toString(2).length;
+  // FIPS 186-5 Appendix A.4.1 requires n >= 2 before reducing modulo n - 1.
+  // Valid field elements are < fieldOrder, so the maximal encoded element is fieldOrder - 1.
+  if (fieldOrder <= _1n) throw new RangeError('field order must be greater than 1');
+  const bitLength = (fieldOrder - _1n).toString(2).length;
   return Math.ceil(bitLength / 8);
 }
 
@@ -338,6 +427,7 @@ export function getFieldBytesLength(fieldOrder: bigint): number {
  * @param fieldOrder - Number of field elements.
  * @returns Byte length of the target hash.
  * @throws On wrong field-order input types. {@link TypeError}
+ * @throws On wrong argument ranges or values. {@link RangeError}
  * @example
  * Choose the minimum hash size that still covers the field order.
  * ```ts
@@ -346,6 +436,9 @@ export function getFieldBytesLength(fieldOrder: bigint): number {
  * ```
  */
 export function getMinHashLength(fieldOrder: bigint): number {
+  // RFC 9380 §5 / §8.9 motivate this 1.5x byte rule by choosing
+  // k = ceil(log2(r) / 2); getFieldBytesLength() enforces the FIPS 186-5
+  // Appendix A.4.1 n >= 2 reduction domain before computing that width.
   const length = getFieldBytesLength(fieldOrder);
   return length + Math.ceil(length / 2);
 }
@@ -360,6 +453,7 @@ export function getMinHashLength(fieldOrder: bigint): number {
  * and {@link https://www.rfc-editor.org/rfc/rfc9380#section-5 | RFC 9380 section 5}.
  * @param key - Hash output from SHA-3 or a similar function.
  * @param fieldOrder - Size of the subgroup.
+ * @param min - Optional inclusive lower bound; defaults to `1n`, producing `[1, fieldOrder - 1]`.
  * @returns Valid private scalar encoding.
  * @throws On wrong field-order input types. {@link TypeError}
  * @throws On hash outputs that are too short to reduce safely. {@link RangeError}
@@ -372,15 +466,25 @@ export function getMinHashLength(fieldOrder: bigint): number {
  * mapHashToField(key, 23n);
  * ```
  */
-export function mapHashToField(key: Uint8Array, fieldOrder: bigint): Uint8Array {
+export function mapHashToField(
+  key: TArg<Uint8Array>,
+  fieldOrder: bigint,
+  min: bigint = _1n
+): TRet<Uint8Array> {
   const len = key.length;
   const fieldLen = getFieldBytesLength(fieldOrder);
   const minLen = getMinHashLength(fieldOrder);
   // No small numbers: need to understand bias story. No huge numbers: easier to detect JS timings.
+  // Extra bytes reduce modulo bias further, but runtime still scales with the supplied key length.
   if (len < 16 || len < minLen)
     throw new RangeError(`expected at least ${minLen} bytes of input, got ${len}`);
   const num = bytesToNumber(key);
-  // `mod(x, 11)` can sometimes produce 0. `mod(x, 10) + 1` is the same, but no 0
-  const reduced = mod(num, fieldOrder - 1n) + 1n;
-  return numberToBytes(reduced, fieldLen);
+  if (typeof min !== 'bigint') throw new TypeError('field minimum must be bigint');
+  // FIPS 186-5 Appendix A.4.1 requires n >= 2 before reducing modulo n - 1;
+  // with default min = 1n this range is exactly n - 1.
+  // DH uses min = 2n for the same endpoint-exclusion shape: [2, p - 2].
+  const range = fieldOrder - _2n * min + _1n;
+  if (min < _1n || range < _1n) throw new RangeError('invalid field range');
+  const reduced = mod(num, range) + min;
+  return numberToBytesBE(reduced, fieldLen);
 }

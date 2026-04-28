@@ -1,6 +1,6 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { describe, should } from '@paulmillr/jsbt/test.js';
-import { deepStrictEqual } from 'node:assert';
+import { deepStrictEqual, throws } from 'node:assert';
 import * as dsa from '../src/dsa.ts';
 import { bytesToHex, HASHES, hexToBytes, jsonGZ, parseTestFile } from './utils.ts';
 
@@ -44,6 +44,37 @@ describe('DSA', () => {
   });
   describe('getParams', () => {
     const { genDSAPrimes, genDSAGenerator } = dsa._TEST;
+    should('rejects unsupported DSA size pairs with validation errors', () => {
+      const unsupported = [
+        [4096, 256],
+        [1024, 224],
+        [2048, 160],
+        [3072, 224],
+      ];
+      for (const [L, N] of unsupported) {
+        throws(() => dsa.genDSAParams(L, N, sha256, 1), /Invalid L\/N pair/);
+        throws(() => genDSAPrimes(L, N, sha256, N), /Invalid L\/N pair/);
+      }
+    });
+    should('rejects hash callbacks without noble hash metadata', () => {
+      const bad = ((msg: Uint8Array) => msg) as any;
+      const noBlockLen = Object.assign((msg: Uint8Array) => msg, {
+        outputLen: 32,
+        create: sha256.create,
+      });
+      const noCreate = Object.assign((msg: Uint8Array) => msg, {
+        outputLen: 32,
+        blockLen: 64,
+      });
+      for (const hash of [bad, noBlockLen, noCreate]) {
+        throws(
+          () => dsa.genDSAParams(1024, 160, hash, 1, 160),
+          /Hash must wrapped|expected number/
+        );
+        throws(() => genDSAPrimes(1024, 160, hash, 160), /Hash must wrapped|expected number/);
+        throws(() => dsa.DSA({ p: 23n, q: 11n, g: 2n, hash }), /Hash must wrapped|expected number/);
+      }
+    });
     should('FIPS186-4: genPQ', () => {
       for (const tg of parseTestFile('vectors/186-3dsatestvectors/PQGGen.rsp')) {
         if ('A.1.2.1 Construction of the Primes p and q Using the Shawe-Taylor Algorithm' in tg)
@@ -88,6 +119,64 @@ describe('DSA', () => {
         }
       }
     });
+  });
+
+  should('createHmacDrbg accepts defined falsey predicate results', () => {
+    const hmacFn = (key: Uint8Array, ...msgs: Uint8Array[]) => {
+      const msg = msgs[0] || Uint8Array.of();
+      return Uint8Array.from(
+        { length: key.length },
+        (_, i) => (msg[i % msg.length] || 0) ^ (i + 1)
+      );
+    };
+    const drbg = dsa.createHmacDrbg(4, 4, hmacFn);
+    let calls = 0;
+    deepStrictEqual(
+      drbg(Uint8Array.of(1, 2, 3), () => {
+        calls += 1;
+        return calls === 1 ? 0 : 7;
+      }),
+      0
+    );
+    deepStrictEqual(calls, 1);
+  });
+
+  should('rejects private keys outside the DSA scalar interval', () => {
+    const params = { p: 1543n, q: 257n, g: 64n, hash: sha256 };
+    const dsa1 = dsa.DSA(params);
+    for (const privateKey of [0n, params.q, -1n]) {
+      throws(() => dsa1.getPublicKey(privateKey), /private key/);
+      throws(() => dsa1.sign(privateKey, Uint8Array.of(1, 2, 3)), /private key/);
+    }
+    deepStrictEqual(dsa1.getPublicKey(1n), params.g);
+    deepStrictEqual(dsa1.getPublicKey(params.q - 1n), 217n);
+  });
+
+  should('rejects public keys outside the DSA subgroup', () => {
+    const digest = new Uint8Array(32);
+    digest[1] = 0x80;
+    const hash = Object.assign(() => digest.slice(), {
+      outputLen: 32,
+      blockLen: 64,
+      create() {
+        return {
+          update() {
+            return this;
+          },
+          digest() {
+            return digest.slice();
+          },
+        };
+      },
+    });
+    const params = { p: 1543n, q: 257n, g: 64n, hash };
+    const dsa1 = dsa.DSA(params);
+    const msg = Uint8Array.of(1, 2, 3);
+    const valid = Uint8Array.of(0, 64, 0, 65);
+    const forged = Uint8Array.of(0, 64, 0, 1);
+    deepStrictEqual(dsa1.verify(params.g, msg, valid), true);
+    for (const publicKey of [0n, 1n, params.p - 1n, params.p])
+      deepStrictEqual(dsa1.verify(publicKey, msg, forged), false);
   });
 
   //https://datatracker.ietf.org/doc/html/rfc6979#appendix-A.2.1

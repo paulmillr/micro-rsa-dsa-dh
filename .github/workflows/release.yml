@@ -4,8 +4,8 @@ on:
     types: [created]
 jobs:
   release-js:
-    name: 'jsbt v0.5.0' # Should match commit below
-    uses: paulmillr/jsbt/.github/workflows/release.yml@8a0e8bacab177cbe72ee412345d42331cfc0a261
+    name: jsbt v0.5.2
+    uses: paulmillr/jsbt/.github/workflows/release.yml@3b6bf563e416e9c6047db19410988922084e1e92
     permissions:
       contents: read
       id-token: write

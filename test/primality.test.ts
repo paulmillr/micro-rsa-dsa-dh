@@ -1,4 +1,4 @@
-import { describe, should } from '@paulmillr/jsbt/test.js';
+import { describe, it } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual, throws } from 'node:assert';
 import * as primality from '../src/primality.ts';
 import { IFCPrimes } from '../src/rsa.ts';
@@ -24,7 +24,7 @@ import { jsonGZ, parseTestFile } from './utils.ts';
 describe('primality', () => {
   const { millerRabinBaseTest, jacobi } = primality;
 
-  should('Example', () => {
+  it('Example', () => {
     // Non-deterministic Miller-Rabin test over random bases (multiple iterations).
     // This test is probabilistic and may produce false positives (pseudoprimes).
     // Increasing the number of iterations (second parameter) decreases the probability of false positives.
@@ -60,7 +60,7 @@ describe('primality', () => {
     deepStrictEqual(primality.isProbablySafePrime(7n, 10), true);
   });
 
-  should('Safe primes', () => {
+  it('Safe primes', () => {
     //A005385		Safe primes p: (p-1)/2 is also prime.
     const A005385 = [
       5, 7, 11, 23, 47, 59, 83, 107, 167, 179, 227, 263, 347, 359, 383, 467, 479, 503, 563, 587,
@@ -70,7 +70,7 @@ describe('primality', () => {
     for (const i of A005385) deepStrictEqual(primality.isProbablySafePrime(i, 10), true);
   });
 
-  should('GCD', () => {
+  it('GCD', () => {
     deepStrictEqual(gcd(5777n, -1n), 1n);
     deepStrictEqual(gcd(5777n, 1n), 1n);
     deepStrictEqual(gcd(48n, 18n), 6n);
@@ -79,7 +79,7 @@ describe('primality', () => {
     deepStrictEqual(gcd(-48n, -18n), 6n);
   });
 
-  should('sqrt', () => {
+  it('sqrt', () => {
     deepStrictEqual(sqrt(0n), 0n);
     deepStrictEqual(sqrt(1n), 1n);
     deepStrictEqual(sqrt(2n), 1n);
@@ -102,7 +102,7 @@ describe('primality', () => {
     throws(() => sqrt(-1n), { name: 'RangeError' });
   });
 
-  should('utils validation', () => {
+  it('utils validation', () => {
     throws(() => ensureBytes('msg', 1 as any), { name: 'TypeError' });
     throws(() => ensureBytes('msg', 'zz'), { name: 'RangeError' });
     throws(() => ensureBytes('msg', Uint8Array.of(1), 2), { name: 'RangeError' });
@@ -118,7 +118,7 @@ describe('primality', () => {
     throws(() => mapHashToField(new Uint8Array(1), 23n), { name: 'RangeError' });
   });
 
-  should('randomBits validates bit lengths before randomness', () => {
+  it('randomBits validates bit lengths before randomness', () => {
     const calls: number[] = [];
     const rand = (bytes: number) => {
       calls.push(bytes);
@@ -131,7 +131,7 @@ describe('primality', () => {
     deepStrictEqual(calls, [1]);
   });
 
-  should('numberToBytesBE and numberToVarBytesBE split fixed and variable encodings', () => {
+  it('numberToBytesBE and numberToVarBytesBE split fixed and variable encodings', () => {
     deepStrictEqual(numberToBytesBE(255n, 1), Uint8Array.of(0xff));
     deepStrictEqual(numberToBytesBE(256n, 2), Uint8Array.of(0x01, 0x00));
     throws(() => numberToBytesBE(256n, 1), { name: 'RangeError' });
@@ -141,7 +141,7 @@ describe('primality', () => {
     throws(() => numberToVarBytesBE(-1n), { name: 'RangeError' });
   });
 
-  should('mapHashToField respects explicit scalar lower bounds', () => {
+  it('mapHashToField respects explicit scalar lower bounds', () => {
     const key = new Uint8Array(Math.max(16, getMinHashLength(23n)));
     deepStrictEqual(mapHashToField(key, 23n), Uint8Array.of(1));
     deepStrictEqual(mapHashToField(key, 23n, 2n), Uint8Array.of(2));
@@ -150,7 +150,7 @@ describe('primality', () => {
     });
   });
 
-  should('field-order helpers follow the noble-curves scalar-range width', () => {
+  it('field-order helpers follow the noble-curves scalar-range width', () => {
     const orders = [255n, 256n, 257n, 65535n, 65536n].map((fieldOrder) => ({
       fieldOrder,
       bytes: getFieldBytesLength(fieldOrder),
@@ -180,7 +180,7 @@ describe('primality', () => {
     }
   });
 
-  should('rejects zero Miller-Rabin iterations', () => {
+  it('rejects zero Miller-Rabin iterations', () => {
     const rand = () => Uint8Array.of(0, 2);
     throws(() => primality.millerRabin(1009n, 0, rand), /iterations/i);
     throws(() => primality.isProbablePrime(1009n, 0, rand), /iterations/i);
@@ -188,14 +188,14 @@ describe('primality', () => {
     deepStrictEqual(primality.millerRabin(1009n, 1, rand), true);
   });
 
-  should('rejects Miller-Rabin candidates without valid random bases', () => {
+  it('rejects Miller-Rabin candidates without valid random bases', () => {
     const rand = () => Uint8Array.of(0);
     throws(() => primality.millerRabin(2n, 1, rand), /base interval/i);
     throws(() => primality.millerRabin(3n, 1, rand), /base interval/i);
     deepStrictEqual(primality.isProbablePrime(3n, 1, rand), true);
   });
 
-  should('rejects fixed Miller-Rabin bases outside the FIPS interval', () => {
+  it('rejects fixed Miller-Rabin bases outside the FIPS interval', () => {
     throws(() => primality.millerRabinBaseTest(23n, 34n), /base/i);
     throws(() => primality.millerRabinBaseTest(23n, 1n), /base/i);
     throws(() => primality.millerRabinBaseTest(23n, 22n), /base/i);
@@ -204,18 +204,18 @@ describe('primality', () => {
     deepStrictEqual(primality.millerRabinBaseTest(23n, 21n), true);
   });
 
-  should('lucas handles small nonsquares without perfect-square oscillation', () => {
+  it('lucas handles small nonsquares without perfect-square oscillation', () => {
     deepStrictEqual(primality.lucas(3n), true);
     deepStrictEqual(primality.lucas(7n), true);
     deepStrictEqual(primality.lucas(9n), false);
   });
 
-  should('Jacobi', () => {
+  it('Jacobi', () => {
     deepStrictEqual(jacobi(0n, 1n), 1);
     deepStrictEqual(jacobi(2n, 5n), -1);
     deepStrictEqual(jacobi(5n, 3439601197n), -1);
   });
-  should('Primes', () => {
+  it('Primes', () => {
     const vectors = jsonGZ('./vectors/wycheproof/primality_test.json.gz');
     for (const tg of vectors.testGroups) {
       for (const t of tg.tests) {
@@ -226,7 +226,7 @@ describe('primality', () => {
     }
   });
 
-  should('Pseudoprimes', () => {
+  it('Pseudoprimes', () => {
     // Here we test Lucas and Miller-Rabin tests with pseudoprimes on which they should fail.
     // Usually this code tested to make sure they correctly detect some pseudoprimes,
     // but we also test that they fail on pseudoprimes they expected to fail. This
@@ -316,7 +316,7 @@ describe('primality', () => {
     }
   });
 
-  should('Probable primes (FIPS186-3)', () => {
+  it('Probable primes (FIPS186-3)', () => {
     const parsed = parseTestFile(
       'vectors/186-3rsatestvectors/KeyGen_186-3_RandomProbablyPrime3_3_KAT.txt'
     );
@@ -330,7 +330,7 @@ describe('primality', () => {
     }
   });
 
-  should('IFCPrimes', () => {
+  it('IFCPrimes', () => {
     // super slow, 2048 - 1s, 4096 - 11s, 8192 - 122s
     // but there is very random and constantly change
     // AVG (20 iters):
@@ -359,4 +359,4 @@ describe('primality', () => {
   });
 });
 
-should.runWhen(import.meta.url);
+it.runWhen(import.meta.url);

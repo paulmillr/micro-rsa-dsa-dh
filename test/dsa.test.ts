@@ -1,5 +1,5 @@
 import { sha256 } from '@noble/hashes/sha2.js';
-import { describe, should } from '@paulmillr/jsbt/test.js';
+import { describe, it } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual, throws } from 'node:assert';
 import * as dsa from '../src/dsa.ts';
 import { bytesToHex, HASHES, hexToBytes, jsonGZ, parseTestFile } from './utils.ts';
@@ -16,7 +16,7 @@ const DSA_VECTORS = [
 ].map((i) => jsonGZ(`vectors/wycheproof/${i}`));
 
 describe('DSA', () => {
-  should('Example', () => {
+  it('Example', () => {
     // 1. Params
     // Carol generates random params (because there is public params to use :()
     const carolParams = dsa.genDSAParams(2048, 256, sha256, 1);
@@ -44,7 +44,7 @@ describe('DSA', () => {
   });
   describe('getParams', () => {
     const { genDSAPrimes, genDSAGenerator } = dsa._TEST;
-    should('rejects unsupported DSA size pairs with validation errors', () => {
+    it('rejects unsupported DSA size pairs with validation errors', () => {
       const unsupported = [
         [4096, 256],
         [1024, 224],
@@ -56,7 +56,7 @@ describe('DSA', () => {
         throws(() => genDSAPrimes(L, N, sha256, N), /Invalid L\/N pair/);
       }
     });
-    should('rejects hash callbacks without noble hash metadata', () => {
+    it('rejects hash callbacks without noble hash metadata', () => {
       const bad = ((msg: Uint8Array) => msg) as any;
       const noBlockLen = Object.assign((msg: Uint8Array) => msg, {
         outputLen: 32,
@@ -75,7 +75,7 @@ describe('DSA', () => {
         throws(() => dsa.DSA({ p: 23n, q: 11n, g: 2n, hash }), /Hash must wrapped|expected number/);
       }
     });
-    should('FIPS186-4: genPQ', () => {
+    it('FIPS186-4: genPQ', () => {
       for (const tg of parseTestFile('vectors/186-3dsatestvectors/PQGGen.rsp')) {
         if ('A.1.2.1 Construction of the Primes p and q Using the Shawe-Taylor Algorithm' in tg)
           break;
@@ -92,7 +92,7 @@ describe('DSA', () => {
         }
       }
     });
-    should('FIPS186-4: genG', () => {
+    it('FIPS186-4: genG', () => {
       let found = false;
       for (const tg of parseTestFile('vectors/186-3dsatestvectors/PQGGen.rsp')) {
         // I hope one day they will make it machine readable.
@@ -121,7 +121,7 @@ describe('DSA', () => {
     });
   });
 
-  should('createHmacDrbg accepts defined falsey predicate results', () => {
+  it('createHmacDrbg accepts defined falsey predicate results', () => {
     const hmacFn = (key: Uint8Array, ...msgs: Uint8Array[]) => {
       const msg = msgs[0] || Uint8Array.of();
       return Uint8Array.from(
@@ -141,7 +141,7 @@ describe('DSA', () => {
     deepStrictEqual(calls, 1);
   });
 
-  should('rejects private keys outside the DSA scalar interval', () => {
+  it('rejects private keys outside the DSA scalar interval', () => {
     const params = { p: 1543n, q: 257n, g: 64n, hash: sha256 };
     const dsa1 = dsa.DSA(params);
     for (const privateKey of [0n, params.q, -1n]) {
@@ -152,7 +152,7 @@ describe('DSA', () => {
     deepStrictEqual(dsa1.getPublicKey(params.q - 1n), 217n);
   });
 
-  should('rejects public keys outside the DSA subgroup', () => {
+  it('rejects public keys outside the DSA subgroup', () => {
     const digest = new Uint8Array(32);
     digest[1] = 0x80;
     const hash = Object.assign(() => digest.slice(), {
@@ -181,7 +181,7 @@ describe('DSA', () => {
 
   //https://datatracker.ietf.org/doc/html/rfc6979#appendix-A.2.1
   describe('RFC6979', () => {
-    should('DSA-1024', () => {
+    it('DSA-1024', () => {
       const p = BigInt(
         '0x86F5CA03DCFEB225063FF830A0C769B9DD9D6153AD91D7CE27F787C43278B447' +
           'E6533B86B18BED6E8A48B784A14C252C5BE0DBF60B86D6385BD2F12FB763ED88' +
@@ -281,7 +281,7 @@ describe('DSA', () => {
         deepStrictEqual(bytesToHex(dsa1.sign(privKey, msg)), (t.r + t.s).toLowerCase());
       }
     });
-    should('DSA-2048', () => {
+    it('DSA-2048', () => {
       const p = BigInt(
         '0x9DB6FB5951B66BB6FE1E140F1D2CE5502374161FD6538DF1648218642F0B5C48' +
           'C8F7A41AADFA187324B87674FA1822B00F1ECF8136943D7C55757264E5A1A44F' +
@@ -396,7 +396,7 @@ describe('DSA', () => {
     });
   });
 
-  should('Wycheproof', () => {
+  it('Wycheproof', () => {
     for (const v of DSA_VECTORS) {
       for (const tg of v.testGroups) {
         const hash = HASHES[tg.sha];
@@ -416,4 +416,4 @@ describe('DSA', () => {
   });
 });
 
-should.runWhen(import.meta.url);
+it.runWhen(import.meta.url);

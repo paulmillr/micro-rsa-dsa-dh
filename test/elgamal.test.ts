@@ -1,4 +1,4 @@
-import { describe, should } from '@paulmillr/jsbt/test.js';
+import { describe, it } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual } from 'node:assert';
 import * as elg from '../src/elgamal.ts';
 
@@ -55,7 +55,7 @@ const SIGNATURE = [
 ];
 
 describe('ElGamal', () => {
-  should('Example', () => {
+  it('Example', () => {
     // NOTE: this is super slow! 512: 1s, 1024: 20s, 2048: 1046s
     const params = elg.genElGamalParams(512);
     const elgamal = elg.ElGamal(params);
@@ -70,7 +70,7 @@ describe('ElGamal', () => {
     const sig = elgamal.sign(alicePriv, msg); // Alice sings message using private key
     deepStrictEqual(elgamal.verify(alicePub, msg, sig), true); // Other parties can verify it using Alice public key
   });
-  should('Encryption', () => {
+  it('Encryption', () => {
     for (const t of ENCRYPTION) {
       const p = BigInt(`0x${t.p}`);
       const g = BigInt(`0x${t.g}`);
@@ -86,7 +86,7 @@ describe('ElGamal', () => {
       deepStrictEqual(elgamal.encrypt(y, pt, k), { ct1, ct2 });
     }
   });
-  should('Signature', () => {
+  it('Signature', () => {
     for (const t of SIGNATURE) {
       const p = BigInt(`0x${t.p}`);
       const g = BigInt(`0x${t.g}`);
@@ -103,7 +103,7 @@ describe('ElGamal', () => {
       deepStrictEqual(elgamal.verify(y, h, sig), true);
     }
   });
-  should('handles odd-byte modulus widths in generated secrets', () => {
+  it('handles odd-byte modulus widths in generated secrets', () => {
     const saved = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
     Object.defineProperty(globalThis, 'crypto', {
       configurable: true,
@@ -128,4 +128,4 @@ describe('ElGamal', () => {
   });
 });
 
-should.runWhen(import.meta.url);
+it.runWhen(import.meta.url);

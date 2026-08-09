@@ -1,5 +1,5 @@
 import { sha256 } from '@noble/hashes/sha2.js';
-import { describe, should } from '@paulmillr/jsbt/test.js';
+import { describe, it } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual, throws } from 'node:assert';
 import * as fs from 'node:fs';
 import { join as pathjoin } from 'node:path';
@@ -193,28 +193,28 @@ describe('RSA', () => {
   const { RSAEP, RSADP, RSASP1 } = rsa._TEST;
 
   describe('Examples', () => {
-    should('OAEP', () => {
+    it('OAEP', () => {
       const alice = rsa.keygen(2048);
       const oaep = rsa.OAEP(sha256, rsa.mgf1(sha256));
       const msg = new Uint8Array([1, 2, 3]);
       const encrypted = oaep.encrypt(alice.publicKey, msg);
       deepStrictEqual(oaep.decrypt(alice.privateKey, encrypted), msg);
     });
-    should('PSS', () => {
+    it('PSS', () => {
       const alice = rsa.keygen(2048);
       const pss = rsa.PSS(sha256, rsa.mgf1(sha256));
       const msg = new Uint8Array([1, 2, 3]);
       const sig = pss.sign(alice.privateKey, msg);
       deepStrictEqual(pss.verify(alice.publicKey, msg, sig), true);
     });
-    should('PCKS1', () => {
+    it('PCKS1', () => {
       const alice = rsa.keygen(2048);
       const pkcs = rsa.PKCS1_SHA256;
       const msg = new Uint8Array([1, 2, 3]);
       const sig = pkcs.sign(alice.privateKey, msg);
       deepStrictEqual(pkcs.verify(alice.publicKey, msg, sig), true);
     });
-    should('PCKS1 KEM', () => {
+    it('PCKS1 KEM', () => {
       const alice = rsa.keygen(2048);
       const pkcs = rsa.PKCS1_KEM;
       const msg = new Uint8Array([1, 2, 3]);
@@ -223,7 +223,7 @@ describe('RSA', () => {
     });
   });
 
-  should('Basic', () => {
+  it('Basic', () => {
     const { publicKey, privateKey } = rsa.keygen(2048);
     const message = BigInt('0x1234567890abcdef');
     const encryptedMessage = RSAEP(publicKey, message);
@@ -231,7 +231,7 @@ describe('RSA', () => {
     deepStrictEqual(decryptedMessage.toString(16), message.toString(16));
   });
 
-  should('uses caller randomness for RSA prime search candidates', () => {
+  it('uses caller randomness for RSA prime search candidates', () => {
     const saved = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
     let globalCalls = 0;
     Object.defineProperty(globalThis, 'crypto', {
@@ -256,7 +256,7 @@ describe('RSA', () => {
     }
   });
 
-  should('mgf1 validates mask lengths before generating output', () => {
+  it('mgf1 validates mask lengths before generating output', () => {
     const mgf = rsa.mgf1(sha256);
     deepStrictEqual(mgf(Uint8Array.of(1), { dkLen: 0 }), Uint8Array.of());
     deepStrictEqual(bytesToHex(mgf(Uint8Array.of(1), { dkLen: 5 })), '957b88b127');
@@ -265,7 +265,7 @@ describe('RSA', () => {
     throws(() => mgf(Uint8Array.of(1), { dkLen: Number.NaN }), /mask|length|dkLen/i);
   });
 
-  should('rejects public keys outside the RFC exponent interval', () => {
+  it('rejects public keys outside the RFC exponent interval', () => {
     const msg = Uint8Array.of(1, 2, 3);
     const n = (1n << 1023n) + 1n;
     const sig = emsaPkcs1Sha256(msg, 128);
@@ -286,7 +286,7 @@ describe('RSA', () => {
     deepStrictEqual(rsa.PKCS1_SHA256.verify({ n, e: 3n }, msg, sig), false);
   });
 
-  should('rejects invalid private exponents across private-key operations', () => {
+  it('rejects invalid private exponents across private-key operations', () => {
     const msg = Uint8Array.of(1, 2, 3);
     const n = (1n << 1023n) + 1n;
     const pss = rsa.PSS(sha256, rsa.mgf1(sha256));
@@ -308,7 +308,7 @@ describe('RSA', () => {
     }
   });
 
-  should('generates private exponents as lambda representatives', () => {
+  it('generates private exponents as lambda representatives', () => {
     const e = 65537n;
     const { p, q } = rsa.IFCPrimes(2048, e, undefined, undefined, xorshift(2));
     const pair = rsa.keygen(2048, e, xorshift(2));
@@ -329,7 +329,7 @@ describe('RSA', () => {
     );
   });
 
-  should('uses generic OAEP decryption errors for public failure paths', () => {
+  it('uses generic OAEP decryption errors for public failure paths', () => {
     const oaep = rsa.OAEP(sha256, rsa.mgf1(sha256));
     const minKey = { n: (1n << 527n) + 1n, d: 3n };
     const invalid = [
@@ -341,7 +341,7 @@ describe('RSA', () => {
       throws(() => oaep.decrypt(privateKey, ciphertext), /decryption error/i);
   });
 
-  should('uses generic PKCS1 KEM decryption errors for public failure paths', () => {
+  it('uses generic PKCS1 KEM decryption errors for public failure paths', () => {
     const minKey = { n: (1n << 87n) + 1n, d: 3n };
     const invalid = [
       [minKey, new Uint8Array(11).fill(0xff)],
@@ -352,7 +352,7 @@ describe('RSA', () => {
       throws(() => rsa.PKCS1_KEM.decrypt(privateKey, ciphertext), /decryption error/i);
   });
 
-  should('rejects PSS salt lengths above hash output length', () => {
+  it('rejects PSS salt lengths above hash output length', () => {
     const p = 1000003n;
     const q = 1000081n;
     const n = p * q;
@@ -389,7 +389,7 @@ describe('RSA', () => {
     throws(() => pss.sign(privateKey, msg), /salt|sLen|encoding/i);
   });
 
-  should('serializes PSS signatures to the RSA modulus length', () => {
+  it('serializes PSS signatures to the RSA modulus length', () => {
     const pss = rsa.PSS(tinyHash, rsa.mgf1(tinyHash), 0);
     const msg = Uint8Array.of(1);
     const sig = pss.sign(oddBitsPss.privateKey, msg);
@@ -403,7 +403,7 @@ describe('RSA', () => {
     );
   });
 
-  should('maps PSS encoded-message overflow to invalid signature', () => {
+  it('maps PSS encoded-message overflow to invalid signature', () => {
     const pss = rsa.PSS(tinyHash, rsa.mgf1(tinyHash), 0);
     const sig = I2OSP(oddBitsPss.publicKey.n - 1n, 4);
     deepStrictEqual(pss.verify(oddBitsPss.publicKey, Uint8Array.of(1), sig), false);
@@ -413,7 +413,7 @@ describe('RSA', () => {
     const parsed = parseRSADPComponent('vectors/RSADPtestvectors/RSADPComponent800_56B.txt');
     for (const m of parsed) {
       for (const t of m.tests) {
-        should(`${m.mod}/${t.COUNT}`, () => {
+        it(`${m.mod}/${t.COUNT}`, () => {
           const n = BigInt(`0x${t.n}`);
           const e = BigInt(`0x${t.e}`);
           const d = BigInt(`0x${t.d}`);
@@ -439,7 +439,7 @@ describe('RSA', () => {
     const parsed = parseRSADPComponent('vectors/RSA2SP1testvectors/RSASP1.fax');
     for (const m of parsed) {
       for (const t of m.tests) {
-        should(`${m.mod}/${t.COUNT}`, () => {
+        it(`${m.mod}/${t.COUNT}`, () => {
           const n = BigInt(`0x${t.n}`);
           const p = BigInt(`0x${t.p}`);
           const q = BigInt(`0x${t.q}`);
@@ -467,7 +467,7 @@ describe('RSA', () => {
           const d = BigInt(`0x${tg.privateKey.privateExponent}`);
           const publicKey = { n, e };
           const privateKey = { n, d };
-          should(`${tg.keySize}-${tg.sha}-${tg.mgf}-${tg.mgfSha}`, () => {
+          it(`${tg.keySize}-${tg.sha}-${tg.mgf}-${tg.mgfSha}`, () => {
             const opts = getOpts(tg);
             for (const t of tg.tests) {
               const C = hexToBytes(t.ct);
@@ -498,7 +498,7 @@ describe('RSA', () => {
           const privateKey = privKeys[`${tg.publicKey.modulus}/${tg.publicKey.publicExponent}`];
           const sLen = tg.sLen;
           const publicKey = { n, e };
-          should(`${tg.keySize}-${tg.sha}-${tg.mgf}-${tg.mgfSha}`, () => {
+          it(`${tg.keySize}-${tg.sha}-${tg.mgf}-${tg.mgfSha}`, () => {
             const opts = { ...getOpts(tg), sLen };
             const pss = rsa.PSS(opts.hash, opts.mgfHash, opts.sLen);
             const hLen =
@@ -529,7 +529,7 @@ describe('RSA', () => {
           const d = BigInt(`0x${tg.privateKey.privateExponent}`);
           const publicKey = { n, e };
           const privateKey = { n, d };
-          should(`${tg.keySize}`, () => {
+          it(`${tg.keySize}`, () => {
             for (const t of tg.tests) {
               const C = hexToBytes(t.ct);
               const expectedMsg = t.msg;
@@ -556,7 +556,7 @@ describe('RSA', () => {
           const e = BigInt(`0x${tg.publicKey.publicExponent}`);
           const publicKey = { n, e };
           const privateKey = privKeys[`${tg.publicKey.modulus}/${tg.publicKey.publicExponent}`];
-          should(`${tg.keySize}`, () => {
+          it(`${tg.keySize}`, () => {
             const pkcs = {
               'SHA-1': rsa.PKCS1_SHA1,
               'SHA-224': rsa.PKCS1_SHA224,
@@ -585,4 +585,4 @@ describe('RSA', () => {
   });
 });
 
-should.runWhen(import.meta.url);
+it.runWhen(import.meta.url);

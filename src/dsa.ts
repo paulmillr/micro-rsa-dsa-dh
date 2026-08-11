@@ -181,37 +181,47 @@ function genDSAPrimes(
   const seedBytesLen = seedlen / 8;
   const n = Math.ceil(L / outlen) - 1; // 3
   const b = L - 1 - n * outlen; // 4
-  const mask = _2n ** BigInt(N - 1);
+  const mask = _1n << BigInt(N - 1);
+  // Loop invariants of step 11, hoisted out of the prime search.
+  const pow2seedlen = _1n << BigInt(seedlen);
+  const pow2b = _1n << BigInt(b);
+  const pMin = _1n << BigInt(L - 1); // 2^(L-1)
+  const shifts = Array.from({ length: n + 1 }, (_, i) => BigInt(i * outlen));
+  const offsetStep = BigInt(n + 1);
   while (true) {
     const domainParameterSeed = isBytes(seedOrLen)
       ? ensureBytes('seed', seedOrLen)
       : (randFn(seedBytesLen) as TRet<Uint8Array>);
+    const seedNum = bytesToNumber(domainParameterSeed);
     const U = bytesToNumber(hash(domainParameterSeed)) % mask; // 6
     let q = mask + U + _1n - (U % _2n); // 7
     if (!isProbablePrimeDSA_Q(N, q, randFn)) {
       if (isBytes(seed)) throw new Error('Fixed seed, Q is not prime');
       continue; // 9
     }
+    const q2 = _2n * q;
     let offset = _1n; // 10
     for (let counter = 0; counter < 4 * L; counter++) {
-      // 11.1
+      // 11.1: Vj = Hash((domain_parameter_seed + offset + j) mod 2^seedlen)
       const V: bigint[] = [];
       for (let j = 0; j <= n; j++) {
-        const seedWithOffset =
-          bytesToNumber(domainParameterSeed) + offset + (BigInt(j) % _2n ** BigInt(seedlen));
+        const seedWithOffset = (seedNum + offset + BigInt(j)) % pow2seedlen;
         V.push(bytesToNumber(hash(numberToBytesBE(seedWithOffset, seedBytesLen))));
       }
       let W = V[0];
-      for (let i = 1; i < n; i++) W += V[i] * _2n ** BigInt(i * outlen);
-      W += (V[n] % _2n ** BigInt(b)) * _2n ** BigInt(n * outlen); // 11.2
-      const X = W + _2n ** BigInt(L - 1); // 11.3: 0 ≤ W < 2L–1; hence, 2L–1 ≤ X < 2L
-      const c = X % (_2n * q); // 11.4
+      for (let i = 1; i < n; i++) W += V[i] << shifts[i];
+      W += V[n] % pow2b << shifts[n]; // 11.2
+      const X = W + pMin; // 11.3: 0 ≤ W < 2L–1; hence, 2L–1 ≤ X < 2L
+      const c = X % q2; // 11.4
       const p = X - (c - _1n); // 11.5: p ≡ 1 (mod 2q).
-      if (p >= _2n ** BigInt(L - 1) && isProbablePrimeDSA_P(L, p, randFn)) {
+      if (p >= pMin && isProbablePrimeDSA_P(L, p, randFn)) {
         return { p, q, domainParameterSeed, counter, hash };
       }
-      offset += BigInt(n) + _1n; // 11.9
+      offset += offsetStep; // 11.9
     }
+    // Step 12 restarts from step 5 with a fresh seed; a fixed seed would
+    // deterministically repeat the same failed search forever.
+    if (isBytes(seed)) throw new Error('Fixed seed, no prime P found');
   }
 }
 
@@ -233,13 +243,14 @@ function genDSAGenerator(res: ReturnType<typeof genDSAPrimes>, index: number): b
     throw new Error('wrong params');
   }
   const e = (p - _1n) / q; // Step 3
+  const ggen = hexToBytes('6767656e'); // 'ggen' in ascii
   for (let count = 0; ; ) {
     count++; // Step 5
     count &= 0xffff; // 16 bit integer
     if (count === 0) throw new Error('counter wrapped'); // Step 6
     const U = concatBytes(
       domainParameterSeed,
-      hexToBytes('6767656e'), // 'ggen' in ascii
+      ggen,
       new Uint8Array([index]),
       new Uint8Array([count >> 8, count & 0xff])
     ); // Step 7
@@ -443,15 +454,20 @@ export const DSA = (params: TArg<DSAParams>): TRet<DSAApi> => {
       const drbg = createHmacDrbg(hash.outputLen, fieldBytes, hmacFn);
       const h = mod(bits2int(mHash), q);
       const seed = concatBytes(I2OSP(privateKey % q, fieldBytes), I2OSP(h, fieldBytes)); // Step D of RFC6979 3.2
-      const k = drbg(seed, (kBytes) => {
+      const q1 = q - _1n;
+      const { r, s } = drbg(seed, (kBytes) => {
         kBytes = kBytes.subarray(0, fieldBytes); // hash can be bigger than fieldBytes
         const k = OS2IP(kBytes);
-        if (_1n < k && k < q - _1n) return k;
-        return;
-      }) as bigint; // Steps B, C, D, E, F, G
-      const r = pow(g, k, p) % q; // (g^k % p) % q
-      const ik = invert(k, q); // k^-1 mod n
-      const s = mod(ik * mod(h + r * privateKey, q), q);
+        if (!(_1n < k && k < q1)) return;
+        // FIPS 186-4 §4.6 / RFC 6979 §2.4 step 5: if r = 0 or s = 0,
+        // reject this k and generate a new one.
+        const r = pow(g, k, p) % q; // (g^k % p) % q
+        if (r === _0n) return;
+        const ik = invert(k, q); // k^-1 mod q
+        const s = mod(ik * mod(h + r * privateKey, q), q);
+        if (s === _0n) return;
+        return { r, s };
+      }) as DERSig; // Steps B, C, D, E, F, G, H
       // compact (P1363)
       const res = concatBytes(numberToBytesBE(r, fieldBytes), numberToBytesBE(s, fieldBytes));
       return res;
@@ -466,8 +482,11 @@ export const DSA = (params: TArg<DSAParams>): TRet<DSAApi> => {
         ({ r, s } = DER.toSig(signature));
       } catch (derError) {
         if (!(derError instanceof DER.Err)) throw derError;
-        r = bytesToNumber(signature.slice(0, fieldBytes));
-        s = bytesToNumber(signature.slice(fieldBytes, 2 * fieldBytes));
+        // Compact (P1363) encoding is exactly 2*fieldBytes: reject other lengths
+        // so a signature with appended garbage does not also verify.
+        if (signature.length !== 2 * fieldBytes) return false;
+        r = bytesToNumber(signature.subarray(0, fieldBytes));
+        s = bytesToNumber(signature.subarray(fieldBytes));
       }
       if (!isValidPublicKey(publicKey)) return false;
       if (r <= _0n || r >= q || s <= _0n || s >= q) return false;

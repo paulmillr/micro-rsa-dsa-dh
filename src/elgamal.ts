@@ -63,15 +63,16 @@ export function genElGamalParams(bits: number): ElGamalParams {
   // while conditioning on a leading 1 would change the candidate distribution.
   do p = bytesToNumber(randomBytes(bits / 8));
   while (!isProbablySafePrime(p, 10)); // NOTE: this is very slow!
-  const q = (p - _1n) >> _1n;
+  const p1 = p - _1n;
+  const q = p1 >> _1n;
   while (true) {
     // g=2 -> Bleichenbacher's attack
     const g = randomBigInt(bits / 8, _3n, p);
     if (pow(g, _2n, p) === _1n) continue;
     if (pow(g, q, p) === _1n) continue;
-    if ((p - _1n) % g === _0n) continue;
+    if (p1 % g === _0n) continue;
     const gInv = invert(g, p); // Khadir's attack
-    if ((p - _1n) % gInv === _0n) continue;
+    if (p1 % gInv === _0n) continue;
     return { p, g };
   }
 }
@@ -102,9 +103,10 @@ export const ElGamal = (params: ElGamalParams): ElGamalApi => {
   // Odd-width moduli such as 257 need whole-octet random material; dividing
   // hex length by 2 produces fractional byte lengths that randomBytes rejects.
   const pBytes = getFieldBytesLength(p);
+  const p1 = p - _1n; // signature/nonce modulus, hoisted out of the methods
   return {
     randomPrivateKey(): bigint {
-      return randomBigInt(pBytes, _2n, p - _1n); // [2, p-1)
+      return randomBigInt(pBytes, _2n, p1); // [2, p-1)
     },
     getPublicKey(privateKey: bigint): bigint {
       if (typeof privateKey !== 'bigint') throw new Error('privateKey should be bigint');
@@ -118,8 +120,11 @@ export const ElGamal = (params: ElGamalParams): ElGamalApi => {
     encrypt(publicKey: bigint, message: bigint, nonce?: bigint): { ct1: bigint; ct2: bigint } {
       if (typeof publicKey !== 'bigint') throw new Error('publicKey should be bigint');
       if (typeof message !== 'bigint') throw new Error('wrong message');
-      if (nonce === undefined) nonce = randomBigInt(pBytes, _1n, p - _1n);
-      if (typeof nonce !== 'bigint' || nonce <= _0n || nonce >= p - _1n)
+      // Plaintext is a field element: values outside [0, p) cannot round-trip
+      // through decrypt(), which reduces mod p.
+      if (message < _0n || message >= p) throw new Error('message must be in range [0, p)');
+      if (nonce === undefined) nonce = randomBigInt(pBytes, _1n, p1);
+      if (typeof nonce !== 'bigint' || nonce <= _0n || nonce >= p1)
         throw new Error(`invalid nonce=${nonce}`);
       const c1 = pow(g, nonce, p); // c1 = g^k mod p
       const yk = pow(publicKey, nonce, p); // c2 = m * (y^k mod p) mod p
@@ -130,26 +135,38 @@ export const ElGamal = (params: ElGamalParams): ElGamalApi => {
       if (typeof privateKey !== 'bigint') throw new Error('privateKey should be bigint');
       if (typeof ciphertext.ct1 !== 'bigint' || typeof ciphertext.ct2 !== 'bigint')
         throw new Error('invalid ciphertext');
+      // Ciphertext components are field elements; negative or oversized values
+      // would silently produce wrong plaintext below.
+      const { ct1, ct2 } = ciphertext;
+      if (ct1 < _0n || ct1 >= p || ct2 < _0n || ct2 >= p) throw new Error('invalid ciphertext');
       // Decryption process
-      const c1x = pow(ciphertext.ct1, privateKey, p); // c1^x mod p
+      const c1x = pow(ct1, privateKey, p); // c1^x mod p
       const invC1x = invert(c1x, p); // (c1^x)^-1 mod p
-      const m = (ciphertext.ct2 * invC1x) % p; // (c2 * (c1^x)^-1) mod p
+      const m = (ct2 * invC1x) % p; // (c2 * (c1^x)^-1) mod p
 
       return m;
     },
     sign(privateKey: bigint, message: bigint, nonce?: bigint): { r: bigint; s: bigint } {
       if (typeof privateKey !== 'bigint') throw new Error('privateKey should be bigint');
       if (typeof message !== 'bigint') throw new Error('wrong message');
-      if (nonce === undefined) {
-        do nonce = randomBigInt(pBytes, _1n, p - _1n);
-        while (gcd(nonce, p - _1n) !== _1n); // there is no invert otherwise
+      const isFixedNonce = nonce !== undefined;
+      for (;;) {
+        let k = nonce;
+        if (k === undefined) {
+          do k = randomBigInt(pBytes, _1n, p1);
+          while (gcd(k, p1) !== _1n); // there is no invert otherwise
+        }
+        if (typeof k !== 'bigint' || k <= _0n || k >= p1) throw new Error(`invalid nonce=${k}`);
+        const r = pow(g, k, p);
+        const kInv = invert(k, p1);
+        const s = mod(kInv * (message - privateKey * r), p1);
+        // s = 0 cannot pass the range check in verify(); a fresh nonce is required.
+        if (s === _0n) {
+          if (isFixedNonce) throw new Error('sign: s = 0, use a different nonce');
+          continue;
+        }
+        return { r, s };
       }
-      if (typeof nonce !== 'bigint' || nonce <= _0n || nonce >= p - _1n)
-        throw new Error(`invalid nonce=${nonce}`);
-      const r = pow(g, nonce, p);
-      const kInv = invert(nonce, p - _1n);
-      const s = mod(kInv * (message - privateKey * r), p - _1n);
-      return { r, s };
     },
     verify(publicKey: bigint, message: bigint, sig: { r: bigint; s: bigint }): boolean {
       if (typeof publicKey !== 'bigint') throw new Error('publicKey should be bigint');
@@ -160,6 +177,11 @@ export const ElGamal = (params: ElGamalParams): ElGamalApi => {
       // treated as RFC-invalid here without an explicit OpenPGP rule.
       if (typeof sig.r !== 'bigint' || typeof sig.s !== 'bigint')
         throw new Error('invalid signature');
+      // RFC 2440 §12.5: verifiers must check 0 < r < p and 0 < s < p - 1.
+      // Without this, valid signatures are malleable (s + (p-1) also passes)
+      // and Bleichenbacher's CRT forgery transforms one valid signature into
+      // signatures over arbitrary messages.
+      if (sig.r <= _0n || sig.r >= p || sig.s <= _0n || sig.s >= p1) return false;
       const gH = pow(g, message, p);
       const yR = pow(publicKey, sig.r, p);
       const rS = pow(sig.r, sig.s, p);

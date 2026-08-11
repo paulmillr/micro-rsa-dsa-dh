@@ -119,9 +119,13 @@ export function IFCPrimes(
 ): { p: bigint; q: bigint } {
   if (nlen % 8 !== 0) throw new Error(`expected bit length aligned to byte boundary, got ${nlen}`);
   if (nlen < 2048) throw new Error(`wrong nlen=${nlen}, expected at least 2048`); // Step 1: Check nlen
-  if (e <= _2n ** _16n || e >= _2n ** _256n || e % _2n === _0n)
+  if (e <= _1n << _16n || e >= _1n << _256n || e % _2n === _0n)
     throw new Error(`Wrong public exponent e=${e}`); // Step 2: Check e
+  // limit = floor(sqrt(2) * 2^(nlen/2 - 1)); 2^(nlen-1) is never a perfect
+  // square (nlen-1 is odd), so an integer candidate violates the FIPS bound
+  // "p < sqrt(2) * 2^(nlen/2 - 1)" exactly when it is <= limit.
   const limit = sqrt(_1n << BigInt(nlen - 1));
+  const minDistance = _1n << (BigInt(nlen / 2) - _100n); // Step 5.5 bound
   // Step 4: Generate p
   // FIPS 186-5 A.1.3 steps 4.2 and 5.2 require both candidate draws to come from the selected DRBG, i.e. randFn in this API.
   for (let i = 0; i < 5 * nlen; i++) {
@@ -130,7 +134,7 @@ export function IFCPrimes(
     if (a !== undefined)
       p += BigInt((a - Number(p % _8n)) % 8); // Step 4.3
     else if (p % _2n === _0n) p += _1n; // Step 4.3
-    if (p < limit) continue; // Step 4.4
+    if (p <= limit) continue; // Step 4.4
     if (gcd(p - _1n, e) === _1n) {
       // Step 4.5
       if (isProbablePrimeRSA(p, randFn)) {
@@ -141,10 +145,10 @@ export function IFCPrimes(
           if (b !== undefined)
             q += BigInt((b - Number(q % _8n)) % 8); // Step 5.3
           else if (q % _2n === _0n) q += _1n; // Step 5.3
-          if (q < limit) continue; // Step 5.4
+          if (q <= limit) continue; // Step 5.4
           let distance = p - q;
           if (distance < _0n) distance = -distance;
-          if (distance <= _2n ** ((BigInt(nlen) >> _1n) - _100n)) continue; // Step 5.5
+          if (distance <= minDistance) continue; // Step 5.5
           if (gcd(q - _1n, e) === _1n && isProbablePrimeRSA(q, randFn)) return { p, q }; // Step 5.6
         }
         throw new Error('failed to find q after max iterations');
@@ -337,7 +341,7 @@ export function keygen(
     const d = invert(e, lambda);
     // FIPS 186-5 Appendix A.1.1 requires `d = e^-1 mod LCM(p - 1, q - 1)`
     // and `2^(nlen/2) < d`; in the rare small-d case it says new p, q, and d shall be determined.
-    if (d <= _2n ** BigInt(nlen / 2)) continue;
+    if (d <= _1n << BigInt(nlen / 2)) continue;
     return { publicKey: { e, n }, privateKey: { d, n } };
   }
 }
@@ -367,6 +371,9 @@ export const OAEP = (
   label: TArg<Uint8Array> = Uint8Array.of()
 ): TRet<KEM> => {
   const labelBytes = ensureBytes('label', label);
+  // Steps 7.1.1 2a / 7.1.2 3a: lHash depends only on the fixed label,
+  // so it is computed once per scheme instead of once per operation.
+  const lHash = hash(labelBytes);
   return {
     encrypt(publicKey: PublicKey, M: TArg<Uint8Array>): TRet<Uint8Array> {
       validatePublicKey(publicKey);
@@ -375,7 +382,6 @@ export const OAEP = (
       const k = Math.ceil(n.toString(16).length / 2);
       const mLen = msg.length;
       if (mLen > k - 2 * hash.outputLen - 2) throw new Error('message too long');
-      const lHash = hash(labelBytes); // Step 2a
       const PS = new Uint8Array(k - mLen - 2 * hash.outputLen - 2); // Step 2b
       const DB = concatBytes(lHash, PS, new Uint8Array([0x01]), msg); // Step 2c: DB = lHash || PS || 0x01 || M
       const seed = randomBytes(hash.outputLen); // Step 2d
@@ -402,7 +408,6 @@ export const OAEP = (
       if (c >= n) throw new Error('decryption error');
       const m = RSADP(privateKey, c); // Step 2b
       const EM = I2OSP(m, k); // Step 2c
-      const lHash = hash(labelBytes); // Step 3a
       // Step 3b
       const Y = EM[0];
       const maskedSeed = EM.subarray(1, 1 + hash.outputLen) as TRet<Uint8Array>;
@@ -548,7 +553,7 @@ export const PSS = (
     if (m === false) return false;
     // RFC 8017 §8.1.2 step 2c: if I2OSP(m, emLen) outputs "integer too large",
     // output "invalid signature" instead of leaking the conversion error.
-    if (m >= _256n ** BigInt(emLen)) return false;
+    if (m >= _1n << BigInt(8 * emLen)) return false;
     const EM = I2OSP(m, emLen); // Step 2c
     return EMSA_PSS_VERIFY(M, EM, emBits, { hash, mgfHash, sLen }); // Step 3
   },
@@ -567,13 +572,13 @@ export const PSS = (
  */
 function EMSA_PKCS1_V1_5_ENCODE(
   hash: TArg<Hash>,
-  prefix: string,
+  prefix: TArg<Uint8Array>,
   M: TArg<Uint8Array>,
   emLen: number
 ): TRet<Uint8Array> {
   const H = hash(ensureBytes('message', M));
   // RFC 8017 §9.2 step 2: prefix is the DER DigestInfo prefix for this hash; the built-in SHA-1/SHA-2 PKCS#1 v1.5 variants use the Appendix B.1 NULL-parameter encodings.
-  const T = concatBytes(hexToBytes(prefix), H);
+  const T = concatBytes(prefix, H);
   const tLen = T.length;
   if (emLen < tLen + 11) throw new Error('intended encoded message length too short');
   const PS = new Uint8Array(emLen - tLen - 3).fill(0xff); // Step 4
@@ -604,10 +609,10 @@ export const PKCS1_KEM: TRet<KEM> = /* @__PURE__ */ Object.freeze({
     const psLen = k - mLen - 3;
     const PS = new Uint8Array(psLen); // Step 2a
     // RFC 8017 §7.2.1 step 2a: PS must contain only nonzero random octets; the step-1 length bound guarantees PS is at least 8 bytes long here.
-    for (let i = 0; i < psLen; i++) {
-      let rnd = 0;
-      while (rnd === 0) rnd = randomBytes(1)[0];
-      PS[i] = rnd;
+    // Rejection-sample in batches: draw the remaining count, keep nonzero octets.
+    for (let i = 0; i < psLen; ) {
+      const rnd = randomBytes(psLen - i);
+      for (let j = 0; j < rnd.length; j++) if (rnd[j] !== 0) PS[i++] = rnd[j];
     }
     const EM = concatBytes(new Uint8Array([0x00, 0x02]), PS, new Uint8Array([0x00]), M); // Step 2b
     const m = OS2IP(EM); // Step 3a
@@ -663,8 +668,9 @@ export interface IPKCS {
   sign(privateKey: PrivateKey, M: TArg<Uint8Array>): TRet<Uint8Array>;
 }
 /** RSASSA-PKCS1-v1_5: old Signature Scheme with Appendix (SSA) as first standardized in version 1.5 of PKCS #1. */
-const PKCS1 = (hash: TArg<Hash>, prefix: string): TRet<IPKCS> =>
-  /* @__PURE__ */ Object.freeze({
+const PKCS1 = (hash: TArg<Hash>, prefixHex: string): TRet<IPKCS> => {
+  const prefix = hexToBytes(prefixHex);
+  return /* @__PURE__ */ Object.freeze({
     // RFC 8017 §8.2 uses EMSA-PKCS1-v1_5 as a scheme parameter, so hash and prefix must stay paired for the same DigestInfo encoding.
     verify(publicKey: PublicKey, M: TArg<Uint8Array>, S: TArg<Uint8Array>): boolean {
       validatePublicKey(publicKey);
@@ -692,6 +698,7 @@ const PKCS1 = (hash: TArg<Hash>, prefix: string): TRet<IPKCS> =>
       return I2OSP(s, k); // Step 2c
     },
   });
+};
 
 // Encoded OIDs
 /** PKCS#1 v1.5 signer using SHA-1. */

@@ -69,29 +69,29 @@ export function millerRabin(
   validateMillerRabinIterations(iterations);
   if (typeof randFn !== 'function') throw new Error('randFn should be function');
   if (w < _2n) return false;
+  const w1 = w - _1n;
   // FIPS 186-5 Appendix B.3.1 step 4.2 requires 1 < b < w - 1.
   // The smallest integer base is 1 + 1, so it must still be below w - 1.
-  if (_1n + _1n >= w - _1n)
-    throw new Error('millerRabin: invalid candidate, no valid random base interval');
+  if (_2n >= w1) throw new Error('millerRabin: invalid candidate, no valid random base interval');
   // Step 1: Find a such that 2^a * m = w - 1
   let a = 0;
-  let m = w - _1n;
-  while (m % _2n === _0n) {
+  let m = w1;
+  while ((m & _1n) === _0n) {
     m >>= _1n;
     a += 1;
   }
-  if (_2n ** BigInt(a) * m !== w - _1n) throw new Error('millerRabin: wrong assertion');
+  if (m << BigInt(a) !== w1) throw new Error('millerRabin: wrong assertion');
   const wlen = w.toString(2).length; // 3. _wlen_ = **len** ( _w_ ).
   step4: for (let i = 1; i <= iterations; i++) {
     // Step 4.1 + 4.2
     let b: bigint = _0n;
-    while (b <= _1n || b >= w - _1n) b = randomBits(wlen, randFn);
+    while (b <= _1n || b >= w1) b = randomBits(wlen, randFn);
     let z = pow(b, m, w); // Step 4.3
-    if (z === _1n || z === w - _1n) continue; // Step 4.4
+    if (z === _1n || z === w1) continue; // Step 4.4
     // Step 4.5
     for (let j = 1; j <= a - 1; j++) {
       z = (z * z) % w; // Step 4.5.1
-      if (z === w - _1n) continue step4; // Step 4.5.2 + 4.7 (continue 4)
+      if (z === w1) continue step4; // Step 4.5.2 + 4.7 (continue 4)
       if (z === _1n) return false; // 4.5.3 + 4.6
     }
     return false;
@@ -134,18 +134,22 @@ function isPerfectSquare(C: bigint): boolean {
   const n = C.toString(2).length; // Step 1: Determine n such that 2^n > C >= 2^(n-1)
   const m = BigInt(Math.ceil(n / 2)); // Step 2: m = ⌈n / 2⌉
   // Step 4: Select X0 such that 2^m > X0 >= 2^(m-1)
-  let X0 = _2n ** (m - _1n);
-  if (X0 * X0 > C) X0 = X0 / _2n;
-  if (!(_2n ** m > X0 && X0 >= _2n ** (m - _1n)))
+  let X0 = _1n << (m - _1n);
+  if (X0 * X0 > C) X0 >>= _1n;
+  if (!(_1n << m > X0 && X0 >= _1n << (m - _1n)))
     throw new Error('isPerfectSquare: wrong assertion');
-  let Xi = X0;
   // FIPS 186-5 Appendix B.4 step 5 says to repeat the Newton update
   // "Until (Xi)^2 < 2^m + C"; step 6 then compares C with floor(Xi)^2.
   // Do not use a repeated-value sentinel here: small nonsquares such as 3
   // can otherwise oscillate instead of reaching the FIPS stop condition.
-  do Xi = (Xi ** _2n + C) / (_2n * Xi);
-  while (Xi ** _2n >= _2n ** m + C);
-  return Xi * Xi === C; // Step 6: Check if C is a perfect square
+  const limit = (_1n << m) + C;
+  let Xi = X0;
+  let sq = Xi * Xi;
+  do {
+    Xi = (sq + C) / (Xi << _1n);
+    sq = Xi * Xi;
+  } while (sq >= limit);
+  return sq === C; // Step 6: Check if C is a perfect square
 }
 
 /**
@@ -166,7 +170,7 @@ export function jacobi(a: bigint, n: bigint): number {
   if (a === _0n) return 0; // Step 3
   // Step 4: Define e and a1 such that a = 2^e * a1, where a1 is odd
   let e = 0;
-  while (a % _2n === _0n) {
+  while ((a & _1n) === _0n) {
     a >>= _1n;
     e++;
   }
@@ -208,18 +212,20 @@ export function lucas(C: bigint): boolean {
     if (js === -1 && gcd(C, (_1n - D) / _4n) === _1n) break;
   }
   const K = C + _1n; // Step 3
-  const r = K.toString(2).length - 1; // Step 4
+  const Kbin = K.toString(2);
+  const r = Kbin.length - 1; // Step 4
   // prettier-ignore
   let Ui = _1n, Vi = _1n; // Step 5
   // Computes (A * (C + 1) / 2) % C
-  const div2 = (A: bigint, C: bigint) => mod(A * ((C + _1n) >> _1n), C);
-  // Step 6
-  for (let i = BigInt(r - 1); i >= _0n; i--) {
+  const half = K >> _1n; // (C + 1) / 2
+  const div2 = (A: bigint) => mod(A * half, C);
+  // Step 6: bit i of K is Kbin[r - i]; iterate i = r-1 ... 0
+  for (let j = 1; j <= r; j++) {
     const Utemp = mod(Ui * Vi, C); // Step 6.1
-    const Vtemp = div2(Vi * Vi + Ui * Ui * D, C); // Step 6.2
-    if ((K >> i) & _1n) {
-      Ui = div2(Utemp + Vtemp, C); // Step 6.3.1
-      Vi = div2(Vtemp + Utemp * D, C); // Step 6.3.2
+    const Vtemp = div2(Vi * Vi + Ui * Ui * D); // Step 6.2
+    if (Kbin.charCodeAt(j) === 49 /* '1' */) {
+      Ui = div2(Utemp + Vtemp); // Step 6.3.1
+      Vi = div2(Vtemp + Utemp * D); // Step 6.3.2
     } else {
       Ui = Utemp; // Step 6.3.3
       Vi = Vtemp; // Step 6.3.4

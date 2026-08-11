@@ -34,9 +34,6 @@ export type Hex = Uint8Array | string; // hex strings are accepted for simplicit
 const _0n = /* @__PURE__ */ BigInt(0);
 const _1n = /* @__PURE__ */ BigInt(1);
 const _2n = /* @__PURE__ */ BigInt(2);
-const _8n = /* @__PURE__ */ BigInt(8);
-const _0xffn = /* @__PURE__ */ BigInt(0xff);
-const _256n = /* @__PURE__ */ BigInt(256);
 const isPosBig = (n: bigint) => typeof n === 'bigint' && _0n <= n;
 function abignumber(n: number | bigint) {
   if (typeof n === 'bigint') {
@@ -111,13 +108,10 @@ export function I2OSP(x: bigint, xLen: number): TRet<Uint8Array> {
   // RFC 8017 §4.1 defines `x` as a "nonnegative integer to be converted";
   // step 1 separately rejects values that exceed the requested octet length.
   if (x < _0n) throw new RangeError('integer must be nonnegative');
-  if (x >= _256n ** BigInt(xLen)) throw new RangeError('integer too large');
-  const res = new Uint8Array(xLen);
-  for (let i = xLen - 1; i >= 0; i--) {
-    res[i] = Number(x & _0xffn);
-    x >>= _8n;
-  }
-  return res as TRet<Uint8Array>;
+  if (x >= _1n << BigInt(8 * xLen)) throw new RangeError('integer too large');
+  if (xLen === 0) return new Uint8Array(0) as TRet<Uint8Array>; // x = 0 here
+  // Native radix conversion is much faster than a per-byte bigint shift loop.
+  return hexToBytes(x.toString(16).padStart(2 * xLen, '0')) as TRet<Uint8Array>;
 }
 
 /**
@@ -136,9 +130,8 @@ export function OS2IP(X: TArg<Uint8Array>): bigint {
   // RFC 8017 §4.2 takes an octet string `X`; use the noble-hashes byte assertion
   // so non-octet typed arrays cannot feed negative or wider-than-octet values here.
   X = abytes(X, undefined, 'OS2IP');
-  let x = _0n;
-  for (let i = 0; i < X.length; i++) x = (x << _8n) + BigInt(X[i]);
-  return x;
+  // Native radix conversion is much faster than a per-byte bigint shift loop.
+  return hexToNumber(bytesToHex(X));
 }
 
 /**
@@ -240,16 +233,17 @@ export function invert(number: bigint, modulo: bigint): bigint {
   // Fermat's little theorem "CT-like" version inv(n) = n^(m-2) mod m is 30x slower.
   let a = mod(number, modulo);
   let b = modulo;
+  // Only the Bezout coefficient of `number` is needed, so the second
+  // coefficient pair (y, v) of the extended Euclidean algorithm is not tracked.
   // prettier-ignore
-  let x = _0n, y = _1n, u = _1n, v = _0n;
+  let x = _0n, u = _1n;
   while (a !== _0n) {
     // JIT applies optimization if those two lines follow each other
     const q = b / a;
     const r = b % a;
     const m = x - u * q;
-    const n = y - v * q;
     // prettier-ignore
-    b = a, a = r, x = u, y = v, u = m, v = n;
+    b = a, a = r, x = u, u = m;
   }
   const gcd = b;
   if (gcd !== _1n) throw new Error('invert: does not exist');
@@ -279,7 +273,11 @@ export function sqrt(n: bigint): bigint {
   // The integer square-root contract includes zero: 0 is the largest b with
   // b * b <= 0. Return before Newton iteration so it cannot divide by zero.
   if (n <= _1n) return n;
-  let b: bigint = _1n << BigInt(2 * n.toString().length);
+  // Initial guess must be >= sqrt(n): n < 2^bitLen implies sqrt(n) < 2^(bitLen/2 + 1).
+  // Binary toString is much cheaper than the decimal one for big values, and the
+  // tighter guess saves Newton iterations.
+  const bitLen = n.toString(2).length;
+  let b: bigint = _1n << BigInt((bitLen >> 1) + 1);
   for (let a: bigint = (n / b + b) >> _1n; b !== a && b !== a - _1n; ) {
     b = a;
     a = (n / b + b) >> _1n;
@@ -379,7 +377,7 @@ export function numberToBytesBE(n: number | bigint, len: number): TRet<Uint8Arra
  * ```
  */
 export function numberToVarBytesBE(n: number | bigint): TRet<Uint8Array> {
-  return hexToBytes(numberToHexUnpadded(abignumber(n))) as TRet<Uint8Array>;
+  return hexToBytes(numberToHexUnpadded(n)) as TRet<Uint8Array>; // validates n internally
 }
 
 /**

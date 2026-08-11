@@ -1,5 +1,5 @@
-import { describe, it } from '@paulmillr/jsbt/test.js';
-import { deepStrictEqual } from 'node:assert';
+import { describe, should } from '@paulmillr/jsbt/test.js';
+import { deepStrictEqual, throws } from 'node:assert';
 import * as elg from '../src/elgamal.ts';
 
 // Tests from 'https://github.com/Legrandin/pycryptodome/blob/master/lib/Crypto/SelfTest/PublicKey/test_ElGamal.py'
@@ -55,7 +55,7 @@ const SIGNATURE = [
 ];
 
 describe('ElGamal', () => {
-  it('Example', () => {
+  should('Example', () => {
     // NOTE: this is super slow! 512: 1s, 1024: 20s, 2048: 1046s
     const params = elg.genElGamalParams(512);
     const elgamal = elg.ElGamal(params);
@@ -70,7 +70,7 @@ describe('ElGamal', () => {
     const sig = elgamal.sign(alicePriv, msg); // Alice sings message using private key
     deepStrictEqual(elgamal.verify(alicePub, msg, sig), true); // Other parties can verify it using Alice public key
   });
-  it('Encryption', () => {
+  should('Encryption', () => {
     for (const t of ENCRYPTION) {
       const p = BigInt(`0x${t.p}`);
       const g = BigInt(`0x${t.g}`);
@@ -86,7 +86,7 @@ describe('ElGamal', () => {
       deepStrictEqual(elgamal.encrypt(y, pt, k), { ct1, ct2 });
     }
   });
-  it('Signature', () => {
+  should('Signature', () => {
     for (const t of SIGNATURE) {
       const p = BigInt(`0x${t.p}`);
       const g = BigInt(`0x${t.g}`);
@@ -103,7 +103,7 @@ describe('ElGamal', () => {
       deepStrictEqual(elgamal.verify(y, h, sig), true);
     }
   });
-  it('handles odd-byte modulus widths in generated secrets', () => {
+  should('handles odd-byte modulus widths in generated secrets', () => {
     const saved = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
     Object.defineProperty(globalThis, 'crypto', {
       configurable: true,
@@ -128,4 +128,44 @@ describe('ElGamal', () => {
   });
 });
 
-it.runWhen(import.meta.url);
+describe('ElGamal regressions', () => {
+  should('verify rejects out-of-range r/s (RFC 2440 12.5)', () => {
+    const t = SIGNATURE[0];
+    const p = BigInt(`0x${t.p}`);
+    const g = BigInt(`0x${t.g}`);
+    const y = BigInt(`0x${t.y}`);
+    const h = BigInt(`0x${t.h}`);
+    const r = BigInt(`0x${t.sig1}`);
+    const s = BigInt(`0x${t.sig2}`);
+    const elgamal = elg.ElGamal({ p, g });
+    deepStrictEqual(elgamal.verify(y, h, { r, s }), true);
+    // s + (p-1) passed verification before the bounds check, since
+    // r^(p-1) === 1 mod p (Fermat): unbounded s makes signatures malleable.
+    deepStrictEqual(elgamal.verify(y, h, { r, s: s + p - 1n }), false);
+    deepStrictEqual(elgamal.verify(y, h, { r: r + p, s }), false);
+    deepStrictEqual(elgamal.verify(y, h, { r: 0n, s }), false);
+    deepStrictEqual(elgamal.verify(y, h, { r, s: 0n }), false);
+    deepStrictEqual(elgamal.verify(y, h, { r, s: -s }), false);
+    deepStrictEqual(elgamal.verify(y, h, { r, s: p - 1n }), false); // s must be < p-1
+  });
+  should('sign rejects s = 0 instead of emitting an unverifiable signature', () => {
+    const elgamal = elg.ElGamal({ p: 23n, g: 5n });
+    // k = 3: r = 5^3 mod 23 = 10; x = 1, m = 10 => m - x*r = 0 => s = 0
+    throws(() => elgamal.sign(1n, 10n, 3n));
+    // with a self-generated nonce the same message still signs and verifies
+    const sig = elgamal.sign(1n, 10n);
+    deepStrictEqual(elgamal.verify(elgamal.getPublicKey(1n), 10n, sig), true);
+  });
+  should('encrypt/decrypt validate field-element ranges', () => {
+    const elgamal = elg.ElGamal({ p: 23n, g: 5n });
+    const pub = elgamal.getPublicKey(6n);
+    // out-of-range plaintext previously round-tripped to m mod p (or garbage)
+    throws(() => elgamal.encrypt(pub, 23n));
+    throws(() => elgamal.encrypt(pub, -1n));
+    throws(() => elgamal.decrypt(6n, { ct1: -1n, ct2: 5n }));
+    throws(() => elgamal.decrypt(6n, { ct1: 5n, ct2: 23n }));
+    deepStrictEqual(elgamal.decrypt(6n, elgamal.encrypt(pub, 22n)), 22n);
+  });
+});
+
+should.runWhen(import.meta.url);

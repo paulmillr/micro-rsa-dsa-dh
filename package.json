@@ -5,10 +5,11 @@
   "files": [
     "*.js",
     "*.d.ts",
+    "*.map",
     "src"
   ],
   "dependencies": {
-    "@noble/hashes": "^2.2.0"
+    "@noble/hashes": "^2.3.0"
   },
   "devDependencies": {
     "@paulmillr/jsbt": "0.6.5",
@@ -16,7 +17,6 @@
     "typescript": "6.0.2"
   },
   "scripts": {
-    "benchmark:size": "npx bismar@0.1 -bs",
     "build": "tsc",
     "check": "jsbt-check",
     "format": "prettier --write 'src/**/*.{js,ts}' 'test/**/*.{js,ts}'",

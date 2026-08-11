@@ -1,4 +1,4 @@
-import { describe, it } from '@paulmillr/jsbt/test.js';
+import { describe, should } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual, throws } from 'node:assert';
 import * as crypto from 'node:crypto';
 import { DH, DHGroups } from '../src/dh.ts';
@@ -18,7 +18,7 @@ const leftPad = (bytes: Uint8Array, len: number) => {
 };
 
 describe('DH', () => {
-  it('Example', () => {
+  should('Example', () => {
     const nobleDH = DH('modp18');
     const alicePriv = nobleDH.randomPrivateKey();
     const alicePub = nobleDH.getPublicKey(alicePriv);
@@ -30,7 +30,7 @@ describe('DH', () => {
     );
   });
 
-  it('pads public keys to fixed group length', () => {
+  should('pads public keys to fixed group length', () => {
     const nobleDH = DH('modp18');
     const privateKey = new Uint8Array(1024);
     privateKey[1023] = 2;
@@ -39,7 +39,7 @@ describe('DH', () => {
     deepStrictEqual(nobleDH.getSharedSecret(privateKey, publicKey).length, 1024);
   });
 
-  it('rejects caller-supplied private exponents outside the finite-field interval', () => {
+  should('rejects caller-supplied private exponents outside the finite-field interval', () => {
     const nobleDH = DH('modp14');
     const p = DHGroups.modp14.p;
     const len = p.toString(16).length / 2;
@@ -52,7 +52,7 @@ describe('DH', () => {
         throws(op, { name: 'Error' });
   });
 
-  it('rejects peer public keys outside the finite-field interval', () => {
+  should('rejects peer public keys outside the finite-field interval', () => {
     const nobleDH = DH('modp14');
     const p = DHGroups.modp14.p;
     const len = p.toString(16).length / 2;
@@ -61,7 +61,7 @@ describe('DH', () => {
       throws(() => nobleDH.getSharedSecret(privateKey, toBytes(publicKey, len)), { name: 'Error' });
   });
 
-  it('generates private exponents inside the finite-field interval', () => {
+  should('generates private exponents inside the finite-field interval', () => {
     const saved = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
     Object.defineProperty(globalThis, 'crypto', {
       configurable: true,
@@ -83,7 +83,7 @@ describe('DH', () => {
     }
   });
 
-  it('Basic', () => {
+  should('Basic', () => {
     if (process.versions.deno || process.versions.bun) return;
     const getNodeDH = (privateKey, group, bytesLen) => {
       const dhg = crypto.createDiffieHellmanGroup(group);
@@ -105,7 +105,7 @@ describe('DH', () => {
       'modp16',
       'modp17',
       'modp18',
-    ]) {
+    ] as const) {
       // Deno DH is broken:
       // Different groups, if we provide correct group prime/generator it will break anyway
       // node
@@ -133,7 +133,7 @@ describe('DH', () => {
       const bytesLen = DHGroups[group].p.toString(16).length / 2;
       // Example usage
       const aliceDH = getNodeDH(aliceNoble, group, bytesLen);
-      console.log('DH', aliceDH);
+      // console.log('DH', aliceDH);
       const bobDH = getNodeDH(bobNoble, group, bytesLen);
       deepStrictEqual(nobleDH.getPublicKey(aliceNoble), aliceDH.pub);
       deepStrictEqual(nobleDH.getPublicKey(bobNoble), bobDH.pub);
@@ -162,4 +162,30 @@ describe('DH', () => {
   });
 });
 
-it.runWhen(import.meta.url);
+describe('DH regressions', () => {
+  should('accepts every built-in group name and rejects unknown ones', () => {
+    // DH()'s parameter type used to be `keyof DHGroup` ('p' | 'g'), which
+    // rejected all group names at type-check time; the group-name union and
+    // this loop must stay in sync.
+    const names = [
+      'modp1',
+      'modp2',
+      'modp5',
+      'modp14',
+      'modp15',
+      'modp16',
+      'modp17',
+      'modp18',
+    ] as const;
+    deepStrictEqual(Object.keys(DHGroups), [...names]);
+    for (const name of names) {
+      const dh = DH(name);
+      const key = dh.randomPrivateKey();
+      deepStrictEqual(key.length, DHGroups[name].p.toString(16).length / 2);
+    }
+    throws(() => DH('modp3' as never), { name: 'Error' });
+    throws(() => DH('p' as never), { name: 'Error' }); // old signature accepted this
+  });
+});
+
+should.runWhen(import.meta.url);

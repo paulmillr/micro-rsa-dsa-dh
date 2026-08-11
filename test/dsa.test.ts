@@ -1,5 +1,5 @@
 import { sha256 } from '@noble/hashes/sha2.js';
-import { describe, it } from '@paulmillr/jsbt/test.js';
+import { describe, should } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual, throws } from 'node:assert';
 import * as dsa from '../src/dsa.ts';
 import { bytesToHex, HASHES, hexToBytes, jsonGZ, parseTestFile } from './utils.ts';
@@ -16,7 +16,7 @@ const DSA_VECTORS = [
 ].map((i) => jsonGZ(`vectors/wycheproof/${i}`));
 
 describe('DSA', () => {
-  it('Example', () => {
+  should('Example', () => {
     // 1. Params
     // Carol generates random params (because there is public params to use :()
     const carolParams = dsa.genDSAParams(2048, 256, sha256, 1);
@@ -44,7 +44,7 @@ describe('DSA', () => {
   });
   describe('getParams', () => {
     const { genDSAPrimes, genDSAGenerator } = dsa._TEST;
-    it('rejects unsupported DSA size pairs with validation errors', () => {
+    should('rejects unsupported DSA size pairs with validation errors', () => {
       const unsupported = [
         [4096, 256],
         [1024, 224],
@@ -56,7 +56,7 @@ describe('DSA', () => {
         throws(() => genDSAPrimes(L, N, sha256, N), /Invalid L\/N pair/);
       }
     });
-    it('rejects hash callbacks without noble hash metadata', () => {
+    should('rejects hash callbacks without noble hash metadata', () => {
       const bad = ((msg: Uint8Array) => msg) as any;
       const noBlockLen = Object.assign((msg: Uint8Array) => msg, {
         outputLen: 32,
@@ -69,13 +69,16 @@ describe('DSA', () => {
       for (const hash of [bad, noBlockLen, noCreate]) {
         throws(
           () => dsa.genDSAParams(1024, 160, hash, 1, 160),
-          /Hash must wrapped|expected number/
+          /expected hash wrapped|expected number/
         );
-        throws(() => genDSAPrimes(1024, 160, hash, 160), /Hash must wrapped|expected number/);
-        throws(() => dsa.DSA({ p: 23n, q: 11n, g: 2n, hash }), /Hash must wrapped|expected number/);
+        throws(() => genDSAPrimes(1024, 160, hash, 160), /expected hash wrapped|expected number/);
+        throws(
+          () => dsa.DSA({ p: 23n, q: 11n, g: 2n, hash }),
+          /expected hash wrapped|expected number/
+        );
       }
     });
-    it('FIPS186-4: genPQ', () => {
+    should('FIPS186-4: genPQ', () => {
       for (const tg of parseTestFile('vectors/186-3dsatestvectors/PQGGen.rsp')) {
         if ('A.1.2.1 Construction of the Primes p and q Using the Shawe-Taylor Algorithm' in tg)
           break;
@@ -92,7 +95,7 @@ describe('DSA', () => {
         }
       }
     });
-    it('FIPS186-4: genG', () => {
+    should('FIPS186-4: genG', () => {
       let found = false;
       for (const tg of parseTestFile('vectors/186-3dsatestvectors/PQGGen.rsp')) {
         // I hope one day they will make it machine readable.
@@ -121,7 +124,7 @@ describe('DSA', () => {
     });
   });
 
-  it('createHmacDrbg accepts defined falsey predicate results', () => {
+  should('createHmacDrbg accepts defined falsey predicate results', () => {
     const hmacFn = (key: Uint8Array, ...msgs: Uint8Array[]) => {
       const msg = msgs[0] || Uint8Array.of();
       return Uint8Array.from(
@@ -141,7 +144,7 @@ describe('DSA', () => {
     deepStrictEqual(calls, 1);
   });
 
-  it('rejects private keys outside the DSA scalar interval', () => {
+  should('rejects private keys outside the DSA scalar interval', () => {
     const params = { p: 1543n, q: 257n, g: 64n, hash: sha256 };
     const dsa1 = dsa.DSA(params);
     for (const privateKey of [0n, params.q, -1n]) {
@@ -152,7 +155,7 @@ describe('DSA', () => {
     deepStrictEqual(dsa1.getPublicKey(params.q - 1n), 217n);
   });
 
-  it('rejects public keys outside the DSA subgroup', () => {
+  should('rejects public keys outside the DSA subgroup', () => {
     const digest = new Uint8Array(32);
     digest[1] = 0x80;
     const hash = Object.assign(() => digest.slice(), {
@@ -181,7 +184,7 @@ describe('DSA', () => {
 
   //https://datatracker.ietf.org/doc/html/rfc6979#appendix-A.2.1
   describe('RFC6979', () => {
-    it('DSA-1024', () => {
+    should('DSA-1024', () => {
       const p = BigInt(
         '0x86F5CA03DCFEB225063FF830A0C769B9DD9D6153AD91D7CE27F787C43278B447' +
           'E6533B86B18BED6E8A48B784A14C252C5BE0DBF60B86D6385BD2F12FB763ED88' +
@@ -281,7 +284,7 @@ describe('DSA', () => {
         deepStrictEqual(bytesToHex(dsa1.sign(privKey, msg)), (t.r + t.s).toLowerCase());
       }
     });
-    it('DSA-2048', () => {
+    should('DSA-2048', () => {
       const p = BigInt(
         '0x9DB6FB5951B66BB6FE1E140F1D2CE5502374161FD6538DF1648218642F0B5C48' +
           'C8F7A41AADFA187324B87674FA1822B00F1ECF8136943D7C55757264E5A1A44F' +
@@ -396,7 +399,7 @@ describe('DSA', () => {
     });
   });
 
-  it('Wycheproof', () => {
+  should('Wycheproof', () => {
     for (const v of DSA_VECTORS) {
       for (const tg of v.testGroups) {
         const hash = HASHES[tg.sha];
@@ -416,4 +419,43 @@ describe('DSA', () => {
   });
 });
 
-it.runWhen(import.meta.url);
+describe('DSA regressions', () => {
+  // Fixed 1024/160 domain parameters generated via genDSAParams(1024, 160, sha256, 1).
+  const P = BigInt(
+    '0xfb4d20db442e146714e3eea78ce219f26e393f836e5f5b2c9e45a7413aa78780e83021a5de11a50ea42cb136007c' +
+      '8f3a665677934063ad7e0b99ce92e865cf5f32127309ca119065b381d83f4e6eb08da296ec71e2867d7102591883f2b' +
+      '43b8b5466223a69d9c1589a1c50c5985d2c808253834c7e0f191b7ffe5ad15aae1275'
+  );
+  const Q = BigInt('0xebb95e0245a9256196fa7aa07a305f8464942e0f');
+  const G = BigInt(
+    '0x202f32277cbd28cbcedc161c60e4dbf2cd4d13998caef72b0f6f6ab02cd35f68b7a7dcecdc6a8223f9e90f4c11e3' +
+      'c55733ac89818b7d44635cb6df976de0eab649aaedf3912ebdb3ce3115dfe1383cb46b90034a0776620be789e47d40e' +
+      '4c79370bef2e91c10a0f633db695238412f23007ffb97c233bd33b408ad42a2e94068'
+  );
+  const X = BigInt('0x411602cb19a6ccc34494d79d98ef1e7ed5af25f7');
+  const Y = BigInt(
+    '0x62096d6b59a37d252bed114627c935e009a1fceb1c452e82552629f9b1b476a60d6410ae7bd6f037ee273e6dd981' +
+      'b6b9c630884298249c5792f1e3b4bed0d1ed3f3d6dc9c454fa03bc9b7610321150da5797e3dca0a5f57d1d9a5c76a51' +
+      'fb80a34ba6a14be893854c3c1f602899beb7f9e38512f3cffb606a9d6701872f1b8de'
+  );
+  should('verify rejects compact signatures with extra or missing bytes', () => {
+    const d = dsa.DSA({ p: P, q: Q, g: G, hash: sha256 });
+    deepStrictEqual(d.getPublicKey(X), Y);
+    const msg = Uint8Array.from([1, 2, 3, 4]);
+    const sig = d.sign(X, msg);
+    deepStrictEqual(sig.length, 40); // P1363 compact: exactly 2 * fieldBytes
+    deepStrictEqual(d.verify(Y, msg, sig), true);
+    // A valid signature with appended garbage previously fell through DER
+    // parsing into the compact path, which ignored the extra bytes.
+    const appended = new Uint8Array(41);
+    appended.set(sig);
+    deepStrictEqual(d.verify(Y, msg, appended), false);
+    deepStrictEqual(d.verify(Y, msg, sig.subarray(0, 39)), false);
+    // The same (r, s) in DER encoding must still verify.
+    const r = BigInt('0x' + bytesToHex(sig.subarray(0, 20)));
+    const s = BigInt('0x' + bytesToHex(sig.subarray(20)));
+    deepStrictEqual(d.verify(Y, msg, hexToBytes(dsa.DER.hexFromSig({ r, s }))), true);
+  });
+});
+
+should.runWhen(import.meta.url);

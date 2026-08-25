@@ -268,10 +268,15 @@ describe('RSA', () => {
   should('rejects public keys outside the RFC exponent interval', () => {
     const msg = Uint8Array.of(1, 2, 3);
     const n = (1n << 1023n) + 1n;
+    // With e=1, the PKCS#1 encoded message itself is a valid signature. This is
+    // the identity-public-exponent construction demonstrated by badrsa.
     const sig = emsaPkcs1Sha256(msg, 128);
     const pss = rsa.PSS(sha256, rsa.mgf1(sha256));
     const oaep = rsa.OAEP(sha256, rsa.mgf1(sha256));
     const invalid = [
+      { n: 0n, e: 0n },
+      { n: n - 1n, e: 3n },
+      { n, e: 0n },
       { n, e: 1n },
       { n, e: 2n },
       { n, e: 4n },
@@ -292,10 +297,15 @@ describe('RSA', () => {
     const pss = rsa.PSS(sha256, rsa.mgf1(sha256));
     const oaep = rsa.OAEP(sha256, rsa.mgf1(sha256));
     const invalid = [
+      { n: 0n, d: 0n },
+      { n: n - 1n, d: 3n },
       { n, d: 1n },
       { n, d: 0n },
       { n, d: 2n },
       { n, d: n },
+      { n, d: 3n, e: 1n },
+      { n, d: 3n, e: 2n },
+      { n, d: 3n, e: n },
     ];
     for (const privateKey of invalid) {
       throws(() => rsa.PKCS1_SHA256.sign(privateKey, msg), /private|key|exponent|invalid/i);
@@ -306,6 +316,55 @@ describe('RSA', () => {
         /private|key|exponent|invalid/i
       );
     }
+  });
+
+  should('rejects badrsa-style computationally expensive key widths', () => {
+    // https://github.com/jedisct1/badrsa demonstrates that key decoding and
+    // arithmetic policy are separate concerns. This API receives BigInts directly,
+    // so exercise its pre-exponentiation cost limits without vendoring PEM fixtures.
+    const msg = Uint8Array.of(1, 2, 3);
+    const pss = rsa.PSS(sha256, rsa.mgf1(sha256));
+    const oaep = rsa.OAEP(sha256, rsa.mgf1(sha256));
+    const oversizedModulus = (1n << 16384n) + 1n;
+    const oversizedExponent = (1n << 256n) + 1n;
+    const ordinaryModulus = (1n << 1023n) + 1n;
+    const publicKeys = [
+      { n: oversizedModulus, e: 3n },
+      { n: ordinaryModulus, e: oversizedExponent },
+    ];
+    for (const publicKey of publicKeys) {
+      throws(() => rsa.PKCS1_SHA256.verify(publicKey, msg, Uint8Array.of()), /RSA|key/i);
+      throws(() => pss.verify(publicKey, msg, Uint8Array.of()), /RSA|key/i);
+      throws(() => oaep.encrypt(publicKey, msg), /RSA|key/i);
+      throws(() => rsa.PKCS1_KEM.encrypt(publicKey, msg), /RSA|key/i);
+    }
+    deepStrictEqual(
+      rsa.PKCS1_SHA256.verify({ n: (1n << 16383n) + 1n, e: 3n }, msg, new Uint8Array(2048)),
+      false
+    );
+    deepStrictEqual(
+      rsa.PKCS1_SHA256.verify(
+        { n: ordinaryModulus, e: (1n << 256n) - 1n },
+        msg,
+        new Uint8Array(128)
+      ),
+      false
+    );
+
+    const privateKey = { n: oversizedModulus, d: 3n };
+    throws(() => rsa.PKCS1_SHA256.sign(privateKey, msg), /RSA|key/i);
+    throws(() => pss.sign(privateKey, msg), /RSA|key/i);
+    throws(() => oaep.decrypt(privateKey, Uint8Array.of()), /RSA|key/i);
+    throws(() => rsa.PKCS1_KEM.decrypt(privateKey, Uint8Array.of()), /RSA|key/i);
+
+    let randomCalls = 0;
+    const rand = (length: number) => {
+      randomCalls++;
+      return new Uint8Array(length);
+    };
+    throws(() => rsa.IFCPrimes(16392, 65537n, undefined, undefined, rand), /at most 16384/);
+    throws(() => rsa.keygen(16392, 65537n, rand), /at most 16384/);
+    deepStrictEqual(randomCalls, 0);
   });
 
   should('generates private exponents as lambda representatives', () => {
@@ -319,7 +378,7 @@ describe('RSA', () => {
     deepStrictEqual(invert(e, phi) === expectedD, false);
     deepStrictEqual(pair, {
       publicKey: { e, n },
-      privateKey: { d: expectedD, n },
+      privateKey: { d: expectedD, e, n },
     });
     deepStrictEqual(pair.privateKey.d > 2n ** 1024n && pair.privateKey.d < lambda, true);
     const msg = Uint8Array.of(1, 2, 3);
@@ -605,6 +664,46 @@ describe('RSA regressions', () => {
   );
   const publicKey = { n: N, e: 65537n };
   const privateKey = { n: N, d: D };
+  should('blinds keys with e while preserving legacy n/d private keys', () => {
+    const saved = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    let randomCalls = 0;
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        getRandomValues(arr: Uint8Array) {
+          randomCalls++;
+          arr.fill(0);
+          arr[arr.length - 1] = 2;
+          return arr;
+        },
+      },
+    });
+    try {
+      const msg = Uint8Array.of(1, 2, 3);
+      const legacySignature = rsa.PKCS1_SHA256.sign(privateKey, msg);
+      deepStrictEqual(randomCalls, 0);
+      const blindedPrivateKey = { ...privateKey, e: publicKey.e };
+      const blindedSignature = rsa.PKCS1_SHA256.sign(blindedPrivateKey, msg);
+      deepStrictEqual(blindedSignature, legacySignature);
+      deepStrictEqual(randomCalls > 0, true);
+
+      const oaep = rsa.OAEP(sha256, rsa.mgf1(sha256));
+      const ciphertext = oaep.encrypt(publicKey, msg);
+      randomCalls = 0;
+      deepStrictEqual(oaep.decrypt(privateKey, ciphertext), msg);
+      deepStrictEqual(randomCalls, 0);
+      deepStrictEqual(oaep.decrypt(blindedPrivateKey, ciphertext), msg);
+      deepStrictEqual(randomCalls > 0, true);
+
+      throws(
+        () => rsa.PKCS1_SHA256.sign({ ...privateKey, e: 3n }, msg),
+        /private operation failed/
+      );
+    } finally {
+      if (saved) Object.defineProperty(globalThis, 'crypto', saved);
+      else Reflect.deleteProperty(globalThis, 'crypto');
+    }
+  });
   should('OAEP binds the label to both encryption and decryption', () => {
     const label = Uint8Array.from([1, 2, 3]);
     const withLabel = rsa.OAEP(sha256, rsa.mgf1(sha256), label);

@@ -1,6 +1,8 @@
+import { sha256, sha512 } from '@noble/hashes/sha2.js';
 import { describe, should } from '@paulmillr/jsbt/test.js';
-import { deepStrictEqual, throws } from 'node:assert';
+import { deepStrictEqual, notDeepStrictEqual, throws } from 'node:assert';
 import * as elg from '../src/elgamal.ts';
+import { invert, mod, OS2IP, pow } from '../src/utils.ts';
 
 // Tests from 'https://github.com/Legrandin/pycryptodome/blob/master/lib/Crypto/SelfTest/PublicKey/test_ElGamal.py'
 // There is no real test vectors, nobody uses it.
@@ -55,6 +57,20 @@ const SIGNATURE = [
 ];
 
 describe('ElGamal', () => {
+  should('restarts parameter generation when a safe prime has no acceptable generator', () => {
+    let calls = 0;
+    const rand = (bytes: number) => {
+      deepStrictEqual(bytes, 1);
+      calls++;
+      if (calls === 1) return Uint8Array.of(5);
+      if (calls <= 257) return Uint8Array.of(3);
+      if (calls === 258) return Uint8Array.of(11);
+      return Uint8Array.of(7);
+    };
+    deepStrictEqual(elg.genElGamalParams(8, rand), { p: 11n, g: 7n });
+    deepStrictEqual(calls, 259);
+  });
+
   should('Example', () => {
     // NOTE: this is super slow! 512: 1s, 1024: 20s, 2048: 1046s
     const params = elg.genElGamalParams(512);
@@ -63,12 +79,13 @@ describe('ElGamal', () => {
     const alicePriv = elgamal.randomPrivateKey();
     const alicePub = elgamal.getPublicKey(alicePriv);
     // Encryption
-    const msg = 12345n; // bigint, because there is not rfc for padding and stuff
-    const cipherText = elgamal.encrypt(alicePub, msg); // Somebody encrypts message using Alice public key
-    deepStrictEqual(elgamal.decrypt(alicePriv, cipherText), msg); // Alice can decrypt message using private key
+    const plaintext = new TextEncoder().encode('message');
+    const cipherText = elgamal.encrypt(alicePub, plaintext); // Somebody encrypts message using Alice public key
+    deepStrictEqual(elgamal.decrypt(alicePriv, cipherText), plaintext); // Alice can decrypt message using private key
     // Sign
-    const sig = elgamal.sign(alicePriv, msg); // Alice sings message using private key
-    deepStrictEqual(elgamal.verify(alicePub, msg, sig), true); // Other parties can verify it using Alice public key
+    const message = new TextEncoder().encode('message');
+    const sig = elgamal.sign(alicePriv, message); // Alice signs message using private key
+    deepStrictEqual(elgamal.verify(alicePub, message, sig), true); // Other parties can verify it using Alice public key
   });
   should('Encryption', () => {
     for (const t of ENCRYPTION) {
@@ -80,7 +97,7 @@ describe('ElGamal', () => {
       const ct1 = BigInt(`0x${t.ct1}`);
       const ct2 = BigInt(`0x${t.ct2}`);
       const pt = BigInt(`0x${t.pt}`);
-      const elgamal = elg.ElGamal({ p, g });
+      const elgamal = elg.ElGamal({ p, g }, { unsafeAllowRawEncryption: true });
       deepStrictEqual(elgamal.getPublicKey(x), y);
       deepStrictEqual(elgamal.decrypt(x, { ct1, ct2 }), pt);
       deepStrictEqual(elgamal.encrypt(y, pt, k), { ct1, ct2 });
@@ -97,7 +114,10 @@ describe('ElGamal', () => {
       const r = BigInt(`0x${t.sig1}`);
       const s = BigInt(`0x${t.sig2}`);
       const sig = { r, s };
-      const elgamal = elg.ElGamal({ p, g });
+      const elgamal = elg.ElGamal(
+        { p, g },
+        { unsafeDisablePrehash: true, unsafeAllowRawEncryption: true }
+      );
       deepStrictEqual(elgamal.getPublicKey(x), y);
       deepStrictEqual(elgamal.sign(x, h, k), sig);
       deepStrictEqual(elgamal.verify(y, h, sig), true);
@@ -115,13 +135,14 @@ describe('ElGamal', () => {
       },
     });
     try {
-      const elgamal = elg.ElGamal({ p: 257n, g: 3n });
+      const elgamal = elg.ElGamal({ p: 263n, g: 5n });
       const privateKey = elgamal.randomPrivateKey();
       deepStrictEqual(privateKey, 5n);
       const publicKey = elgamal.getPublicKey(7n);
-      const msg = 9n;
-      deepStrictEqual(elgamal.decrypt(7n, elgamal.encrypt(publicKey, msg)), msg);
-      deepStrictEqual(elgamal.verify(publicKey, msg, elgamal.sign(7n, msg)), true);
+      const plaintext = Uint8Array.of(9);
+      deepStrictEqual(elgamal.decrypt(7n, elgamal.encrypt(publicKey, plaintext)), plaintext);
+      const message = Uint8Array.of(9);
+      deepStrictEqual(elgamal.verify(publicKey, message, elgamal.sign(7n, message)), true);
     } finally {
       if (saved) Object.defineProperty(globalThis, 'crypto', saved);
     }
@@ -129,6 +150,40 @@ describe('ElGamal', () => {
 });
 
 describe('ElGamal regressions', () => {
+  should('prehash signatures by default and reject the raw existential forgery', () => {
+    const p = 23n;
+    const g = 5n;
+    const y = 8n;
+    const B = 2n;
+    const C = 3n;
+    const r = mod(pow(g, B, p) * pow(y, C, p), p);
+    const s = mod(-r * invert(C, p - 1n), p - 1n);
+    const forgedMessage = mod(B * s, p - 1n);
+    const forgedSignature = { r, s };
+
+    const legacy = elg.ElGamal({ p, g }, { unsafeDisablePrehash: true });
+    deepStrictEqual(legacy.verify(y, forgedMessage, forgedSignature), true);
+
+    const message = new TextEncoder().encode('message');
+    const safe = elg.ElGamal({ p, g });
+    deepStrictEqual(safe.verify(y, message, forgedSignature), false);
+    const signature = safe.sign(6n, message, 3n);
+    deepStrictEqual(safe.verify(y, message, signature), true);
+    deepStrictEqual(elg.ElGamal({ p, g }, { prehash: sha256 }).sign(6n, message, 3n), signature);
+    const sha512ElGamal = elg.ElGamal({ p, g }, { prehash: sha512 });
+    const sha512Signature = sha512ElGamal.sign(6n, message, 3n);
+    deepStrictEqual(sha512ElGamal.verify(y, message, sha512Signature), true);
+    notDeepStrictEqual(sha512Signature, signature);
+    throws(() => safe.sign(6n, forgedMessage as never, 3n), { name: 'TypeError' });
+    throws(
+      () =>
+        elg.ElGamal({ p, g }, {
+          prehash: sha256,
+          unsafeDisablePrehash: true,
+        } as elg.ElGamalOptions),
+      /cannot be used together/
+    );
+  });
   should('verify rejects out-of-range r/s (RFC 2440 12.5)', () => {
     const t = SIGNATURE[0];
     const p = BigInt(`0x${t.p}`);
@@ -137,7 +192,10 @@ describe('ElGamal regressions', () => {
     const h = BigInt(`0x${t.h}`);
     const r = BigInt(`0x${t.sig1}`);
     const s = BigInt(`0x${t.sig2}`);
-    const elgamal = elg.ElGamal({ p, g });
+    const elgamal = elg.ElGamal(
+      { p, g },
+      { unsafeDisablePrehash: true, unsafeAllowRawEncryption: true }
+    );
     deepStrictEqual(elgamal.verify(y, h, { r, s }), true);
     // s + (p-1) passed verification before the bounds check, since
     // r^(p-1) === 1 mod p (Fermat): unbounded s makes signatures malleable.
@@ -149,7 +207,10 @@ describe('ElGamal regressions', () => {
     deepStrictEqual(elgamal.verify(y, h, { r, s: p - 1n }), false); // s must be < p-1
   });
   should('sign rejects s = 0 instead of emitting an unverifiable signature', () => {
-    const elgamal = elg.ElGamal({ p: 23n, g: 5n });
+    const elgamal = elg.ElGamal(
+      { p: 23n, g: 5n },
+      { unsafeDisablePrehash: true, unsafeAllowRawEncryption: true }
+    );
     // k = 3: r = 5^3 mod 23 = 10; x = 1, m = 10 => m - x*r = 0 => s = 0
     throws(() => elgamal.sign(1n, 10n, 3n));
     // with a self-generated nonce the same message still signs and verifies
@@ -157,7 +218,7 @@ describe('ElGamal regressions', () => {
     deepStrictEqual(elgamal.verify(elgamal.getPublicKey(1n), 10n, sig), true);
   });
   should('encrypt/decrypt validate field-element ranges', () => {
-    const elgamal = elg.ElGamal({ p: 23n, g: 5n });
+    const elgamal = elg.ElGamal({ p: 23n, g: 5n }, { unsafeAllowRawEncryption: true });
     const pub = elgamal.getPublicKey(6n);
     // out-of-range plaintext previously round-tripped to m mod p (or garbage)
     throws(() => elgamal.encrypt(pub, 23n));
@@ -165,6 +226,116 @@ describe('ElGamal regressions', () => {
     throws(() => elgamal.decrypt(6n, { ct1: -1n, ct2: 5n }));
     throws(() => elgamal.decrypt(6n, { ct1: 5n, ct2: 23n }));
     deepStrictEqual(elgamal.decrypt(6n, elgamal.encrypt(pub, 22n)), 22n);
+  });
+  should('hides plaintext predicates with an authenticated order-q KEM', () => {
+    const p = 23n;
+    const g = 5n;
+    const q = (p - 1n) / 2n;
+    const privateKey = 6n;
+    const safe = elg.ElGamal({ p, g });
+    const publicKey = safe.getPublicKey(privateKey);
+    const message = Uint8Array.of(0, 5, 9);
+    const encrypted = safe.encrypt(publicKey, message);
+
+    deepStrictEqual(safe.decrypt(privateKey, encrypted), message);
+    deepStrictEqual(encrypted.version, 1);
+    deepStrictEqual(encrypted.ephemeral.length, 1);
+    deepStrictEqual(pow(OS2IP(encrypted.ephemeral), q, p), 1n);
+    deepStrictEqual(encrypted.nonce.length, 24);
+    deepStrictEqual(encrypted.ciphertext.length, message.length + 16);
+    notDeepStrictEqual(encrypted.ciphertext.subarray(0, message.length), message);
+
+    // With the legacy scheme and a subgroup public key, the Legendre symbol of
+    // ct2 directly reveals the Legendre symbol of every non-zero plaintext.
+    const raw = elg.ElGamal({ p, g }, { unsafeAllowRawEncryption: true });
+    for (const plaintext of [4n, 5n]) {
+      const { ct2 } = raw.encrypt(publicKey, plaintext, 3n);
+      deepStrictEqual(pow(ct2, q, p), pow(plaintext, q, p));
+    }
+    deepStrictEqual(raw.encrypt(publicKey, 0n, 3n).ct2, 0n);
+  });
+  should('rejects malformed, tampered, and wrong-key authenticated ciphertexts uniformly', () => {
+    const p = 23n;
+    const g = 5n;
+    const safe = elg.ElGamal({ p, g });
+    const privateKey = 6n;
+    const encrypted = safe.encrypt(safe.getPublicKey(privateKey), Uint8Array.of(1, 2, 3));
+    const invalid = /invalid ciphertext/;
+    const tamperedData = Uint8Array.from(encrypted.ciphertext);
+    tamperedData[0] ^= 1;
+    const tamperedEphemeral = Uint8Array.from(encrypted.ephemeral);
+    tamperedEphemeral[0] = 1;
+    const nonSubgroupEphemeral = Uint8Array.of(5);
+
+    throws(() => safe.decrypt(privateKey, { ...encrypted, ciphertext: tamperedData }), invalid);
+    throws(() => safe.decrypt(privateKey, { ...encrypted, ephemeral: tamperedEphemeral }), invalid);
+    throws(
+      () => safe.decrypt(privateKey, { ...encrypted, ephemeral: nonSubgroupEphemeral }),
+      invalid
+    );
+    throws(() => safe.decrypt(privateKey, { ...encrypted, version: 2 as 1 }), invalid);
+    throws(() => safe.decrypt(privateKey, { ct1: 1n, ct2: 2n } as never), invalid);
+    throws(() => safe.decrypt(7n, encrypted), invalid);
+    throws(() => safe.encrypt(1n, Uint8Array.of(1)), /invalid public key/);
+    throws(() => safe.encrypt(p - 1n, Uint8Array.of(1)), /invalid public key/);
+    // @ts-expect-error Safe encryption intentionally has no caller-selected nonce API.
+    throws(() => safe.encrypt(safe.getPublicKey(privateKey), Uint8Array.of(1), 3n), /unsafe/);
+  });
+  should('requires explicit unsafe raw-encryption compatibility mode', () => {
+    const params = { p: 23n, g: 5n };
+    const safe = elg.ElGamal(params);
+    const raw = elg.ElGamal(params, { unsafeAllowRawEncryption: true });
+    const fullyLegacy = elg.ElGamal(params, {
+      unsafeAllowRawEncryption: true,
+      unsafeDisablePrehash: true,
+    });
+    const publicKey = raw.getPublicKey(6n);
+
+    deepStrictEqual(raw.encrypt(publicKey, 9n, 7n), fullyLegacy.encrypt(publicKey, 9n, 7n));
+    throws(() => safe.encrypt(publicKey, 9n as never), { name: 'TypeError' });
+    throws(
+      () => elg.ElGamal(params, { unsafeAllowRawEncryption: 'yes' } as never),
+      /should be boolean/
+    );
+    throws(() => elg.ElGamal({ p: 257n, g: 3n }), /safe-prime modulus/);
+    // Unsafe mode preserves construction and raw operation for legacy groups.
+    deepStrictEqual(
+      elg.ElGamal({ p: 257n, g: 3n }, { unsafeAllowRawEncryption: true }).decrypt(7n, {
+        ct1: 1n,
+        ct2: 9n,
+      }),
+      9n
+    );
+  });
+  should('validates safe parameters and keys while preserving explicit legacy inputs', () => {
+    const params = { p: 23n, g: 5n };
+    const safe = elg.ElGamal(params);
+    const message = Uint8Array.of(1);
+    const signature = safe.sign(6n, message, 3n);
+
+    throws(() => elg.ElGamal({ p: 21n, g: 5n }), /safe-prime modulus/);
+    throws(() => elg.ElGamal({ p: 23n, g: 2n }), /invalid ElGamal generator/);
+    throws(() => elg.ElGamal({ p: 23n, g: 11n }), /invalid ElGamal generator/);
+    throws(() => elg.ElGamal({ p: 23n, g: 22n }), /invalid ElGamal generator/);
+    throws(() => elg.ElGamal({ p: 1n << 16384n, g: 3n }), /must not exceed/);
+
+    for (const privateKey of [-1n, 0n, 1n, 11n, 22n]) {
+      throws(() => safe.getPublicKey(privateKey), /invalid private key/);
+      throws(() => safe.sign(privateKey, message, 3n), /invalid private key/);
+      throws(() => safe.decrypt(privateKey, safe.encrypt(8n, message)), /invalid private key/);
+    }
+    for (const publicKey of [-1n, 0n, 1n, 22n, 23n]) {
+      throws(() => safe.encrypt(publicKey, message), /invalid public key/);
+      throws(() => safe.verify(publicKey, message, signature), /invalid public key/);
+    }
+
+    const legacy = elg.ElGamal(
+      { p: 23n, g: 22n },
+      { unsafeAllowRawEncryption: true, unsafeDisablePrehash: true }
+    );
+    deepStrictEqual(legacy.getPublicKey(0n), 1n);
+    deepStrictEqual(legacy.encrypt(1n, 8n, 7n).ct2, 8n);
+    deepStrictEqual(legacy.verify(22n, 3n, { r: 1n, s: 1n }), true);
   });
 });
 

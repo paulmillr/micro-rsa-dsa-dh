@@ -1,7 +1,13 @@
 import { describe, should } from '@paulmillr/jsbt/test.js';
 import { deepStrictEqual, throws } from 'node:assert';
 import * as crypto from 'node:crypto';
-import { DH, DHGroups } from '../src/dh.ts';
+import {
+  DH,
+  DHGroups,
+  LegacyDHGroups,
+  type DHGroupName,
+  type LegacyDHGroupName,
+} from '../src/dh.ts';
 
 const toBytes = (n: bigint, len: number) => {
   const hex = n.toString(16).padStart(len * 2, '0');
@@ -42,14 +48,16 @@ describe('DH', () => {
   should('rejects caller-supplied private exponents outside the finite-field interval', () => {
     const nobleDH = DH('modp14');
     const p = DHGroups.modp14.p;
+    const q = DHGroups.modp14.q;
     const len = p.toString(16).length / 2;
     const publicKey = nobleDH.getPublicKey(toBytes(2n, len));
-    for (const privateKey of [0n, 1n, p - 1n, p])
+    for (const privateKey of [0n, 1n, q - 1n, q, p - 1n, p])
       for (const op of [
         () => nobleDH.getPublicKey(toBytes(privateKey, len)),
         () => nobleDH.getSharedSecret(toBytes(privateKey, len), publicKey),
       ])
         throws(op, { name: 'Error' });
+    deepStrictEqual(nobleDH.getPublicKey(toBytes(q - 2n, len)).length, len);
   });
 
   should('rejects peer public keys outside the finite-field interval', () => {
@@ -59,6 +67,7 @@ describe('DH', () => {
     const privateKey = toBytes(2n, len);
     for (const publicKey of [0n, 1n, p - 1n, p])
       throws(() => nobleDH.getSharedSecret(privateKey, toBytes(publicKey, len)), { name: 'Error' });
+    throws(() => nobleDH.getSharedSecret(privateKey, toBytes(p - 2n, len)), /outside subgroup/);
   });
 
   should('generates private exponents inside the finite-field interval', () => {
@@ -75,8 +84,9 @@ describe('DH', () => {
     try {
       const nobleDH = DH('modp14');
       const p = DHGroups.modp14.p;
+      const q = DHGroups.modp14.q;
       const key = nobleDH.randomPrivateKey();
-      deepStrictEqual(toNumber(key) >= 2n && toNumber(key) <= p - 2n, true);
+      deepStrictEqual(toNumber(key) >= 2n && toNumber(key) <= q - 2n, true);
       deepStrictEqual(nobleDH.getPublicKey(key).length, p.toString(16).length / 2);
     } finally {
       if (saved) Object.defineProperty(globalThis, 'crypto', saved);
@@ -127,10 +137,16 @@ describe('DH', () => {
       //   });
       // }
 
-      const nobleDH = DH(group);
+      const isLegacy = Object.prototype.hasOwnProperty.call(LegacyDHGroups, group);
+      const nobleDH = isLegacy
+        ? DH(group as LegacyDHGroupName, { allowUnsafeLegacy: true })
+        : DH(group as DHGroupName);
       const aliceNoble = nobleDH.randomPrivateKey();
       const bobNoble = nobleDH.randomPrivateKey();
-      const bytesLen = DHGroups[group].p.toString(16).length / 2;
+      const params = isLegacy
+        ? LegacyDHGroups[group as LegacyDHGroupName]
+        : DHGroups[group as DHGroupName];
+      const bytesLen = params.p.toString(16).length / 2;
       // Example usage
       const aliceDH = getNodeDH(aliceNoble, group, bytesLen);
       // console.log('DH', aliceDH);
@@ -163,28 +179,75 @@ describe('DH', () => {
 });
 
 describe('DH regressions', () => {
-  should('accepts every built-in group name and rejects unknown ones', () => {
+  should('separates obsolete groups behind an explicit unsafe opt-in', () => {
     // DH()'s parameter type used to be `keyof DHGroup` ('p' | 'g'), which
     // rejected all group names at type-check time; the group-name union and
     // this loop must stay in sync.
-    const names = [
-      'modp1',
-      'modp2',
-      'modp5',
-      'modp14',
-      'modp15',
-      'modp16',
-      'modp17',
-      'modp18',
-    ] as const;
-    deepStrictEqual(Object.keys(DHGroups), [...names]);
-    for (const name of names) {
+    const modernNames = ['modp14', 'modp15', 'modp16', 'modp17', 'modp18'] as const;
+    const legacyNames = ['modp1', 'modp2', 'modp5'] as const;
+    deepStrictEqual(Object.keys(DHGroups), [...modernNames]);
+    deepStrictEqual(Object.keys(LegacyDHGroups), [...legacyNames]);
+    for (const name of modernNames) {
       const dh = DH(name);
       const key = dh.randomPrivateKey();
       deepStrictEqual(key.length, DHGroups[name].p.toString(16).length / 2);
     }
+    for (const name of legacyNames) {
+      throws(() => DH(name as never), /legacy.*allowUnsafeLegacy/i);
+      throws(() => DH(name, { allowUnsafeLegacy: false } as never), /legacy/i);
+      throws(() => DH(LegacyDHGroups[name]), /legacy/i);
+      throws(() => DH({ ...LegacyDHGroups[name] }), /legacy/i);
+      const dh = DH(name, { allowUnsafeLegacy: true });
+      const key = dh.randomPrivateKey();
+      deepStrictEqual(key.length, LegacyDHGroups[name].p.toString(16).length / 2);
+      DH(LegacyDHGroups[name], { allowUnsafeLegacy: true });
+    }
+    deepStrictEqual(
+      legacyNames.map((name) => LegacyDHGroups[name].p.toString(2).length),
+      [768, 1024, 1536]
+    );
+    throws(() => DH('modp14', { allowUnsafeLegacy: 'yes' } as never), { name: 'TypeError' });
     throws(() => DH('modp3' as never), { name: 'Error' });
     throws(() => DH('p' as never), { name: 'Error' }); // old signature accepted this
+  });
+
+  should('validates custom subgroup parameters and peer membership', () => {
+    const known = DHGroups.modp14;
+    const custom = { p: known.p, q: known.q, g: 4n };
+    const dh = DH(custom);
+    const len = known.p.toString(16).length / 2;
+    const alice = toBytes(2n, len);
+    const bob = toBytes(3n, len);
+    const alicePublic = dh.getPublicKey(alice);
+    const bobPublic = dh.getPublicKey(bob);
+    deepStrictEqual(dh.getSharedSecret(alice, bobPublic), dh.getSharedSecret(bob, alicePublic));
+    throws(() => dh.getSharedSecret(alice, toBytes(known.p - 2n, len)), /outside subgroup/);
+
+    throws(() => DH({ p: 31n, q: 3n, g: 5n }), /weak or oversized/);
+    throws(() => DH({ p: known.p, q: known.q - 2n, g: known.g }), /invalid custom subgroup/);
+    throws(() => DH({ p: known.p, q: known.q, g: known.p - 1n }), /invalid custom subgroup/);
+    throws(() => DH({ p: 31n, g: 5n } as never), /requires q/);
+    throws(
+      () => DH({ p: 31n, g: 5n } as never, { unsafeAllowUnvalidatedGroup: false }),
+      /requires q/
+    );
+  });
+
+  should('preserves unvalidated custom groups only through explicit unsafe compatibility', () => {
+    const unsafe = DH({ p: 31n, g: 5n }, { unsafeAllowUnvalidatedGroup: true });
+    const publicValues = new Set<bigint>();
+    const sharedValues = new Set<bigint>();
+    for (let x = 2n; x <= 29n; x++) {
+      const privateKey = toBytes(x, 1);
+      publicValues.add(toNumber(unsafe.getPublicKey(privateKey)));
+      sharedValues.add(toNumber(unsafe.getSharedSecret(privateKey, Uint8Array.of(5))));
+    }
+    deepStrictEqual(publicValues, new Set([25n, 1n, 5n]));
+    deepStrictEqual(sharedValues, new Set([25n, 1n, 5n]));
+    throws(
+      () => DH({ p: 31n, g: 5n }, { unsafeAllowUnvalidatedGroup: 'yes' } as never),
+      /should be boolean/
+    );
   });
 });
 

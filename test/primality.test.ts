@@ -204,10 +204,19 @@ describe('primality', () => {
     deepStrictEqual(primality.millerRabinBaseTest(23n, 21n), true);
   });
 
-  should('lucas handles small nonsquares without perfect-square oscillation', () => {
+  should('lucas handles boundaries and even candidates', () => {
+    deepStrictEqual(primality.lucas(-1n), false);
+    deepStrictEqual(primality.lucas(0n), false);
+    deepStrictEqual(primality.lucas(1n), false);
+    deepStrictEqual(primality.lucas(2n), true);
     deepStrictEqual(primality.lucas(3n), true);
+    deepStrictEqual(primality.lucas(4n), false);
+    deepStrictEqual(primality.lucas(6n), false);
     deepStrictEqual(primality.lucas(7n), true);
+    deepStrictEqual(primality.lucas(8n), false);
     deepStrictEqual(primality.lucas(9n), false);
+    // @ts-expect-error runtime type validation
+    throws(() => primality.lucas(2), TypeError);
   });
 
   should('Jacobi', () => {

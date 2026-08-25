@@ -191,7 +191,8 @@ export function jacobi(a: bigint, n: bigint): number {
  * (General) Lucas Probabilistic Primality Test (From FIPS186-5)
  * @param C - Positive integer candidate.
  * @returns `true` when the Lucas test accepts the candidate.
- * @throws If the candidate is not a bigint or an internal Lucas invariant fails. {@link Error}
+ * @throws If the candidate is not a bigint. {@link TypeError}
+ * @throws If an internal Lucas invariant fails. {@link Error}
  * @example
  * Lucas complements Miller-Rabin in the Baillie-PSW test.
  * ```ts
@@ -200,7 +201,10 @@ export function jacobi(a: bigint, n: bigint): number {
  * ```
  */
 export function lucas(C: bigint): boolean {
-  if (typeof C !== 'bigint') throw new Error('number expected to be bigint');
+  if (typeof C !== 'bigint') throw new TypeError('number expected to be bigint');
+  if (C < _2n) return false;
+  if (C === _2n) return true;
+  if ((C & _1n) === _0n) return false;
   if (isPerfectSquare(C)) return false; // Step 1
   // Step 2: Find first D in sequence 5, -7, 9, -11, 13, -15, ...
   let D = _5n;

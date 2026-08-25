@@ -37,7 +37,7 @@ A standalone file [micro-rsa-dsa-dh.js](https://github.com/paulmillr/micro-rsa-d
 ## All imports
 
 ```js
-import { DH, DHGroups } from 'micro-rsa-dsa-dh/dh.js';
+import { DH, DHGroups, LegacyDHGroups } from 'micro-rsa-dsa-dh/dh.js';
 import { DSA } from 'micro-rsa-dsa-dh/dsa.js';
 import { ElGamal, genElGamalParams } from 'micro-rsa-dsa-dh/elgamal.js';
 import {
@@ -76,6 +76,15 @@ RSA is most common example of integer factorization cryptography (IFC).
 
 KEM version of RSA (encrypt/decrypt) is slow and usually used to exchange AES/ChaCha keys.
 
+> [!WARNING]
+> `keygen()` requires a modulus of at least 2048 bits, but imported `PublicKey` and `PrivateKey`
+> values have no minimum-size check for compatibility. Consequently, encryption, decryption,
+> signing, and verification will accept weak sub-2048-bit imported keys. Applications must require
+> `key.n.toString(2).length >= 2048` before active RSA operations. If old signatures require a weak
+> key, isolate that key to legacy verification and never use it for new signatures or ciphertexts.
+> See [FIPS 186-5](https://csrc.nist.gov/pubs/fips/186-5/final) and
+> [NIST's RSA modulus guidance](https://csrc.nist.gov/projects/cryptographic-module-validation-program/notices).
+
 ### OAEP
 
 OAEP is Optimal Asymmetric Encryption Padding.
@@ -96,6 +105,13 @@ deepStrictEqual(oaep.decrypt(alice.privateKey, encrypted), msg);
 ### PSS
 
 Use if you need signatures (sign/verify).
+
+> [!WARNING]
+> `PSS()` accepts caller-selected hashes and does not reject SHA-1. SHA-1 collision resistance is
+> broken, so do not use it to create signatures; use SHA-256 or stronger. SHA-1 should be retained
+> only where old signatures must be verified. `PKCS1_SHA1` likewise still exposes both `sign()` and
+> `verify()` for compatibility: do not call its `sign()` method. Prefer RSA-PSS with SHA-256 or
+> stronger for new signatures. See [NIST's SHA-1 policy](https://csrc.nist.gov/projects/hash-functions/nist-policy-on-hash-functions).
 
 ```ts
 import { deepStrictEqual } from 'node:assert';
@@ -128,6 +144,12 @@ KEM (vulnerable [[1]](https://crypto.stackexchange.com/questions/12688/can-you-e
 [[2]](https://security.stackexchange.com/questions/183179/what-is-rsa-oaep-rsa-pss-in-simple-terms)
 ):
 
+> [!WARNING]
+> `PKCS1_KEM.decrypt()` returns plaintext for valid padding and throws for invalid padding. A service
+> that exposes this distinction is a Bleichenbacher oracle and can allow adaptive plaintext recovery.
+> Use OAEP for new protocols. Legacy online protocols need fixed-length implicit rejection rather
+> than this generic variable-length decryption API.
+
 ```ts
 import { deepStrictEqual } from 'node:assert';
 import * as rsa from 'micro-rsa-dsa-dh/rsa.js';
@@ -140,7 +162,7 @@ deepStrictEqual(pkcs.decrypt(alice.privateKey, encrypted), msg);
 
 ## DH
 
-Same as ECDH, seems safe if pre-defined groups are used. Cons:
+Same as ECDH. Use the predefined groups in `DHGroups`, which are all at least 2048 bits. Cons:
 
 - Long keys
 - Harder to protect from timing attacks
@@ -159,10 +181,33 @@ const bobPub = dh.getPublicKey(bobPriv);
 deepStrictEqual(dh.getSharedSecret(alicePriv, bobPub), dh.getSharedSecret(bobPriv, alicePub));
 ```
 
+The obsolete 768-, 1024-, and 1536-bit groups are separated into `LegacyDHGroups`. They are unsafe
+for new protocols and require an explicit opt-in:
+
+```ts
+import { DH, LegacyDHGroups } from 'micro-rsa-dsa-dh/dh.js';
+
+const legacyParams = LegacyDHGroups.modp5;
+const legacyDH = DH(legacyParams, { allowUnsafeLegacy: true });
+```
+
+Safe custom groups must provide `{ p, q, g }`. Construction validates size bounds, primality,
+`q | p - 1`, and generator order; peer public keys are checked for subgroup membership before
+secret exponentiation. Private exponents use `[2, q - 2]`. Existing unvalidated `{ p, g }` groups
+can be opened only for migration with `{ unsafeAllowUnvalidatedGroup: true }`, which restores the
+old `[2, p - 2]` and range-only behavior.
+
 ## DSA
 
 > [!NOTE]
-> DSA was deprecated in FIPS186-5.
+> DSA was deprecated in FIPS186-5. Imported domains are validated for supported sizes, primality,
+> the `q | p - 1` relation, and generator order. The supported 1024/160 pair is retained only for
+> legacy compatibility and provides roughly 80-bit classical security; prefer 2048/224, 2048/256,
+> or 3072/256 when existing DSA interoperability is unavoidable. DSA also accepts caller-selected
+> hashes, including SHA-1, for compatibility. SHA-1 collision resistance is broken: do not use it
+> to generate parameters or new signatures, and retain it only to verify old signatures. Use an
+> approved SHA-2/SHA-3 hash when existing DSA interoperability is unavoidable. See
+> [NIST's SHA-1 policy](https://csrc.nist.gov/projects/hash-functions/nist-policy-on-hash-functions).
 
 Same as ECDSA, but with big numbers. Cons:
 
@@ -205,23 +250,50 @@ deepStrictEqual(bobDSA.verify(alicePubKey, msg, sig), true);
 
 Mostly for educational purpose: almost nobody uses it.
 
+> [!WARNING]
+> `genElGamalParams()` is a legacy educational helper, not a safe production key generator. It
+> continues to accept breakable sizes for compatibility and does not force the candidate's high
+> bit, so `bits` is only the random candidate-input width—not a guaranteed modulus size. The small
+> values below are intentionally fast, breakable examples. Generator search is bounded for each
+> candidate safe prime and restarts parameter sampling if none is acceptable. [RFC 9580 §§12.6 and
+> 12.8](https://www.rfc-editor.org/rfc/rfc9580.html#section-12.6) prohibits generating or using
+> ElGamal keys, encryption, and signatures in modern OpenPGP; do not use this API for new protocols.
+
 ```ts
 import { deepStrictEqual } from 'node:assert';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { ElGamal, genElGamalParams } from 'micro-rsa-dsa-dh/elgamal.js';
 // NOTE: this is super slow! 512: 1s, 1024: 20s, 2048: 1046s
 const params = genElGamalParams(512);
-const elgamal = ElGamal(params);
+const elgamal = ElGamal(params, { prehash: sha256 }); // SHA-256 is also the default
 
 const alicePriv = elgamal.randomPrivateKey();
 const alicePub = elgamal.getPublicKey(alicePriv);
 // Encryption
-const msg = 12345n; // bigint, because there is not spec for padding/hashing
+const msg = new TextEncoder().encode('secret message');
 const cipherText = elgamal.encrypt(alicePub, msg); // Somebody encrypts message using Alice public key
 deepStrictEqual(elgamal.decrypt(alicePriv, cipherText), msg); // Alice can decrypt message using private key
 // Sign
-const sig = elgamal.sign(alicePriv, msg); // Alice sings message using private key
-deepStrictEqual(elgamal.verify(alicePub, msg, sig), true); // Other parties can verify it using Alice public key
+const signedMsg = new TextEncoder().encode('message');
+const sig = elgamal.sign(alicePriv, signedMsg); // The helper prehashes this byte message
+deepStrictEqual(elgamal.verify(alicePub, signedMsg, sig), true); // Other parties can verify it
 ```
+
+Encryption uses an order-`q` subgroup KEM, HKDF-SHA-256, and XChaCha20-Poly1305. Its versioned
+ciphertext authenticates arbitrary byte messages and does not expose the plaintext's Legendre
+symbol. Decryption never auto-detects legacy ciphertexts.
+
+Default construction validates a safe-prime group, a full-order signing generator, imported
+private keys in `[2, q)`, public-key ranges, and encryption subgroup elements. It deliberately does
+not impose a 2048-bit minimum because legacy and educational groups remain supported; size policy
+is the caller's responsibility. The unsafe raw-encryption option also restores permissive legacy
+parameter and key handling.
+
+Textbook ElGamal's raw bigint ciphertext leaks a plaintext predicate and is malleable. The exact
+legacy API and `{ ct1, ct2 }` format remain available only through
+`ElGamal(params, { unsafeAllowRawEncryption: true })`; use a separately constructed instance to
+decrypt old data during migration. The raw-bigint signature behavior is forgeable and separately
+requires `{ unsafeDisablePrehash: true }`. Set both flags only to recreate the complete legacy API.
 
 ## Primality tests
 
@@ -237,13 +309,18 @@ deepStrictEqual(primality.isProbablePrime(7n, 30), true); // Tests 30 random bas
 deepStrictEqual(primality.isProbablySafePrime(7n, 10), true);
 ```
 
-|                     | Reliable | Deterministic | Note                                                                                                                                                                      |
-| ------------------- | -------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| millerRabin         | No       | No            | Non-deterministic Miller-Rabin test over random bases (multiple iterations).                                                                                              |
-| lucas               | No       | Yes           | Deterministic Lucas test. Generally slower than the Miller-Rabin test but can be more reliable for certain numbers.                                                       |
-| bailliePSW          | Yes      | Yes           | Deterministic test which consists of Miller-Rabin with base 2 and Lucas test. Suitable for critical applications where the highest reliability is required.               |
-| isProbablePrime     | Yes      | No            | Non-deterministic test from FIPS186-5. This is an enhanced version of the Baillie-PSW test, incorporating multiple rounds of the Miller-Rabin test with random bases      |
-| isProbablySafePrime | Yes      | No            | Non-deterministic safe prime test. Slow. Tests if a number is a probable safe prime. A safe prime is a prime number of the form p = 2q + 1, where both p and q are prime. |
+|                     | Reliable | Deterministic | Approx. 2048-bit prime | Performance and use                                                                                                                                                |
+| ------------------- | -------- | ------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| millerRabin         | No       | No            | 68 ms (10 rounds)      | Cost scales approximately linearly with the requested iteration count. Random bases may expose pseudoprimes; increasing the count reduces that probability.        |
+| lucas               | No       | Yes           | 20 ms                  | One deterministic Lucas pass. Faster here than 10 Miller–Rabin rounds, but known Lucas pseudoprimes exist.                                                         |
+| bailliePSW          | Yes      | Yes           | 27 ms                  | One fixed-base Miller–Rabin pass plus Lucas. No false positives are known.                                                                                          |
+| isProbablePrime     | Yes      | No            | 88 ms (10 rounds)      | Runs the requested random Miller–Rabin rounds followed by Lucas, so its cost is approximately the sum of those tests.                                               |
+| isProbablySafePrime | Yes      | No            | 176 ms (10 rounds)     | Runs `isProbablePrime` for both `p` and `(p - 1) / 2`; a safe-prime candidate therefore costs roughly twice a probable-prime test.                                   |
+
+Performance values are median wall times from seven warmed runs on Node.js 26.6.0, using the
+2048-bit RFC 3526 MODP group 14 safe prime. They are comparative rather than portable: hardware and
+runtime versions matter, larger inputs become substantially slower, and composite or small values
+often return much earlier through trial division or the first failed round.
 
 - _Reliable:_ no false positives are known
 - _Deterministic:_ it does not rely on randomness
@@ -252,12 +329,20 @@ deepStrictEqual(primality.isProbablySafePrime(7n, 10), true);
 
 All algorithms use JS bigints, which are not constant-time. When timing attacks could be mounted, they will reveal sensitive information.
 
+Generated RSA private keys include the public exponent `e`, and RSA private operations use it for
+multiplicative blinding and result verification. Legacy `{ n, d }` private keys remain accepted for
+compatibility but use the previous unblinded path; imported keys should include their matching `e`.
+Blinding reduces RSA's input-dependent timing exposure, but it does not make JavaScript bigint
+arithmetic constant-time. DSA, DH, ElGamal, and legacy RSA private operations retain the timing risk.
+
 That generally means:
 
 - Document, mail, messaging encryption, like PGP, is probably OK. It's hard for an attacker to measure timings: they don't know how long it took to create a msg
 - Public APIs are NOT safe. Consider something like "send us document and we will auto-sign it". These cases can leak private keys
 
 For comparison, bigint-based elliptic curve implementations will leak much less info. That's because they operate over much smaller numbers: think 2^256, instead of 2^2048.
+
+RSA operations reject moduli wider than 16384 bits and public exponents at or above 2^256 to bound the cost of attacker-controlled bigint arithmetic. This happens after callers construct the bigint values; applications that parse untrusted serialized keys must also limit input and integer lengths before decoding them. See [badrsa](https://github.com/jedisct1/badrsa) for examples of why parsing, key validation, and operation-cost policy are separate checks.
 
 ## Links
 

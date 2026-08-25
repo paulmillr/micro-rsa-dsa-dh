@@ -15,6 +15,21 @@ const DSA_VECTORS = [
   'dsa_3072_256_sha256_test.json',
 ].map((i) => jsonGZ(`vectors/wycheproof/${i}`));
 
+const getDSAVectorGroup = () => {
+  const group = DSA_VECTORS[0].testGroups[0];
+  const key = group.publicKey;
+  return {
+    group,
+    params: {
+      p: BigInt(`0x${key.p}`),
+      q: BigInt(`0x${key.q}`),
+      g: BigInt(`0x${key.g}`),
+      hash: HASHES[group.sha],
+    },
+    publicKey: BigInt(`0x${key.y}`),
+  };
+};
+
 describe('DSA', () => {
   should('Example', () => {
     // 1. Params
@@ -145,41 +160,25 @@ describe('DSA', () => {
   });
 
   should('rejects private keys outside the DSA scalar interval', () => {
-    const params = { p: 1543n, q: 257n, g: 64n, hash: sha256 };
+    const { params } = getDSAVectorGroup();
     const dsa1 = dsa.DSA(params);
     for (const privateKey of [0n, params.q, -1n]) {
       throws(() => dsa1.getPublicKey(privateKey), /private key/);
       throws(() => dsa1.sign(privateKey, Uint8Array.of(1, 2, 3)), /private key/);
     }
     deepStrictEqual(dsa1.getPublicKey(1n), params.g);
-    deepStrictEqual(dsa1.getPublicKey(params.q - 1n), 217n);
+    deepStrictEqual((params.g * dsa1.getPublicKey(params.q - 1n)) % params.p, 1n);
   });
 
   should('rejects public keys outside the DSA subgroup', () => {
-    const digest = new Uint8Array(32);
-    digest[1] = 0x80;
-    const hash = Object.assign(() => digest.slice(), {
-      outputLen: 32,
-      blockLen: 64,
-      create() {
-        return {
-          update() {
-            return this;
-          },
-          digest() {
-            return digest.slice();
-          },
-        };
-      },
-    });
-    const params = { p: 1543n, q: 257n, g: 64n, hash };
+    const { group, params, publicKey } = getDSAVectorGroup();
     const dsa1 = dsa.DSA(params);
-    const msg = Uint8Array.of(1, 2, 3);
-    const valid = Uint8Array.of(0, 64, 0, 65);
-    const forged = Uint8Array.of(0, 64, 0, 1);
-    deepStrictEqual(dsa1.verify(params.g, msg, valid), true);
+    const valid = group.tests.find((test: { result: string }) => test.result === 'valid');
+    const msg = hexToBytes(valid.msg);
+    const signature = hexToBytes(valid.sig);
+    deepStrictEqual(dsa1.verify(publicKey, msg, signature), true);
     for (const publicKey of [0n, 1n, params.p - 1n, params.p])
-      deepStrictEqual(dsa1.verify(publicKey, msg, forged), false);
+      deepStrictEqual(dsa1.verify(publicKey, msg, signature), false);
   });
 
   //https://datatracker.ietf.org/doc/html/rfc6979#appendix-A.2.1
@@ -438,6 +437,31 @@ describe('DSA regressions', () => {
       'b6b9c630884298249c5792f1e3b4bed0d1ed3f3d6dc9c454fa03bc9b7610321150da5797e3dca0a5f57d1d9a5c76a51' +
       'fb80a34ba6a14be893854c3c1f602899beb7f9e38512f3cffb606a9d6701872f1b8de'
   );
+  should('validates imported domains while retaining legacy 1024/160', () => {
+    const valid = dsa.DSA({ p: P, q: Q, g: G, hash: sha256 });
+    deepStrictEqual(valid.getPublicKey(X), Y);
+
+    throws(() => dsa.DSA({ p: 23n, q: 2n, g: 22n, hash: sha256 }), /Invalid L\/N pair/);
+    throws(() => dsa.DSA({ p: P, q: Q, g: 1n, hash: sha256 }), /generator range/);
+    throws(() => dsa.DSA({ p: P, q: Q - 2n, g: G, hash: sha256 }), /domain relation/);
+    throws(() => dsa.DSA({ p: P, q: Q, g: P - 1n, hash: sha256 }), /subgroup generator/);
+
+    let multiplier = (1n << 1023n) / Q;
+    if (multiplier & 1n) multiplier += 1n;
+    let compositeP = Q * multiplier + 1n;
+    while (compositeP % 3n !== 0n) {
+      multiplier += 2n;
+      compositeP = Q * multiplier + 1n;
+    }
+    deepStrictEqual(compositeP.toString(2).length, 1024);
+    throws(() => dsa.DSA({ p: compositeP, q: Q, g: 2n, hash: sha256 }), /non-prime/);
+
+    const compositeQ = (1n << 159n) + 2n;
+    const relatedP = compositeQ * ((1n << 1023n) / compositeQ + 1n) + 1n;
+    deepStrictEqual(compositeQ.toString(2).length, 160);
+    deepStrictEqual(relatedP.toString(2).length, 1024);
+    throws(() => dsa.DSA({ p: relatedP, q: compositeQ, g: 2n, hash: sha256 }), /non-prime/);
+  });
   should('verify rejects compact signatures with extra or missing bytes', () => {
     const d = dsa.DSA({ p: P, q: Q, g: G, hash: sha256 });
     deepStrictEqual(d.getPublicKey(X), Y);

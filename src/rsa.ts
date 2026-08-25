@@ -28,6 +28,15 @@ const _100n = /* @__PURE__ */ BigInt(100);
 const _256n = /* @__PURE__ */ BigInt(256);
 const _65537n = /* @__PURE__ */ BigInt(65537);
 
+// Keep attacker-controlled RSA operations inside a finite computational envelope.
+// RFC 8017 does not prescribe maximum key widths, but unbounded BigInt operands let
+// otherwise well-formed keys turn a single operation into a CPU/memory denial of service.
+// 16384 bits matches OpenSSL's current public-operation ceiling, while the exponent
+// ceiling matches the FIPS 186-5 key-generation interval enforced by IFCPrimes().
+const MAX_RSA_BITS = 16384;
+const MAX_RSA_MODULUS = /* @__PURE__ */ _1n << BigInt(MAX_RSA_BITS);
+const MAX_RSA_PUBLIC_EXPONENT = /* @__PURE__ */ _1n << _256n;
+
 /** Variable-output hash or XOF helper. */
 // Can be mgf(sha256).
 export type VarLenHash = (msg: TArg<Uint8Array>, opts: { dkLen: number }) => TRet<Uint8Array>;
@@ -117,8 +126,10 @@ export function IFCPrimes(
   b?: number,
   randFn: TArg<RandFn> = randomBytes
 ): { p: bigint; q: bigint } {
+  if (!Number.isSafeInteger(nlen)) throw new Error(`wrong nlen=${nlen}`);
   if (nlen % 8 !== 0) throw new Error(`expected bit length aligned to byte boundary, got ${nlen}`);
   if (nlen < 2048) throw new Error(`wrong nlen=${nlen}, expected at least 2048`); // Step 1: Check nlen
+  if (nlen > MAX_RSA_BITS) throw new Error(`wrong nlen=${nlen}, expected at most ${MAX_RSA_BITS}`);
   if (e <= _1n << _16n || e >= _1n << _256n || e % _2n === _0n)
     throw new Error(`Wrong public exponent e=${e}`); // Step 2: Check e
   // limit = floor(sqrt(2) * 2^(nlen/2 - 1)); 2^(nlen-1) is never a perfect
@@ -199,7 +210,12 @@ export function mgf1(hash: TArg<Hash>): TRet<VarLenHash> {
     return out.subarray(0, dkLen) as TRet<Uint8Array>;
   };
 }
-/** Represents an RSA public key. */
+/**
+ * Represents an RSA public key.
+ * Imported keys have no minimum modulus-size check for compatibility. Applications must require
+ * at least 2048 bits before active encryption or signature operations; weaker keys should be
+ * isolated to legacy verification where unavoidable.
+ */
 export type PublicKey = {
   /** RSA modulus used for encryption and signature verification. */
   n: bigint;
@@ -220,26 +236,34 @@ const validatePublicKey = (key: PublicKey) => {
     typeof key.e !== 'bigint'
   )
     throw new Error('wrong public key');
-  if (key.e < _3n || key.e >= key.n || key.e % _2n === _0n)
+  if (key.n <= _1n || key.n % _2n === _0n || key.n >= MAX_RSA_MODULUS)
+    throw new Error('RSA: invalid or oversized public key modulus');
+  if (key.e < _3n || key.e >= key.n || key.e % _2n === _0n || key.e >= MAX_RSA_PUBLIC_EXPONENT)
     throw new Error('RSA: invalid public key exponent');
 };
 
-/** Represents a simplified RSA private key with basic components. */
+/**
+ * Represents an RSA private key with an optional public exponent for blinding.
+ * Imported keys have no minimum modulus-size check for compatibility. Applications must reject
+ * private keys below 2048 bits rather than using them for decryption or new signatures.
+ */
 export type PrivateKey = {
   /** RSA modulus shared with the public key. */
   n: bigint;
   /** RSA private exponent used for decryption and signing. */
   d: bigint;
+  /** Public exponent used for RSA blinding and result verification. Legacy keys may omit it. */
+  e?: bigint;
 };
 
 // RFC 8017 §3.2 requires d to be positive, below n, and satisfy
-// e*d ≡ 1 (mod λ(n)); RSADP/RSASP1 assume that valid key. This simplified
-// key type lacks e,p,q, so full congruence and the FIPS 186-5 A.1.1
-// d > 2^(nlen/2) bound cannot be checked here. Still, d=1 is below that
-// FIPS bound, d>=n violates RFC 8017 §3.2, and even d cannot satisfy the
-// RFC congruence for RSA moduli made from odd primes. Node/OpenSSL accepts
-// crafted d=1 private keys and signs with them; this API follows the
-// RFC/FIPS private-key domain more strictly.
+// e*d ≡ 1 (mod λ(n)); RSADP/RSASP1 assume that valid key. Legacy keys may
+// lack e, and all keys lack p and q, so full congruence and the FIPS 186-5
+// A.1.1 d > 2^(nlen/2) bound cannot be checked here. Still, d=1 is below
+// that FIPS bound, d>=n violates RFC 8017 §3.2, and even d cannot satisfy
+// the RFC congruence for RSA moduli made from odd primes. Node/OpenSSL
+// accepts crafted d=1 private keys and signs with them; this API follows
+// the RFC/FIPS private-key domain more strictly.
 const validatePrivateKey = (key: PrivateKey) => {
   if (
     key === null ||
@@ -248,9 +272,37 @@ const validatePrivateKey = (key: PrivateKey) => {
     typeof key.d !== 'bigint'
   )
     throw new Error('wrong private key');
-  if (key.n <= _0n || key.d <= _1n || key.d >= key.n || key.d % _2n === _0n)
+  if (key.n <= _1n || key.n % _2n === _0n || key.n >= MAX_RSA_MODULUS)
+    throw new Error('RSA: invalid or oversized private key modulus');
+  if (key.d <= _1n || key.d >= key.n || key.d % _2n === _0n)
     throw new Error('RSA: invalid private key exponent');
+  if (
+    key.e !== undefined &&
+    (typeof key.e !== 'bigint' ||
+      key.e < _3n ||
+      key.e >= key.n ||
+      key.e % _2n === _0n ||
+      key.e >= MAX_RSA_PUBLIC_EXPONENT)
+  )
+    throw new Error('RSA: invalid private key public exponent');
 };
+
+// Multiplicative RSA blinding randomizes attacker-controlled inputs before the
+// private exponentiation. Legacy { n, d } keys retain the previous unblinded
+// behavior; generated keys include e and always take this path.
+function rsaPrivatePow(privateKey: PrivateKey, input: bigint): bigint {
+  const { n, d, e } = privateKey;
+  if (e === undefined) return pow(input, d, n);
+  const bits = n.toString(2).length;
+  let r: bigint;
+  do r = randomBits(bits);
+  while (r <= _1n || r >= n || gcd(r, n) !== _1n);
+  const blinded = (input * pow(r, e, n)) % n;
+  const blindedResult = pow(blinded, d, n);
+  const result = (blindedResult * invert(r, n)) % n;
+  if (pow(result, e, n) !== input) throw new Error('RSA private operation failed');
+  return result;
+}
 
 /**
  * RSA Encryption Primitive (RSAEP)
@@ -276,7 +328,7 @@ function RSAEP(publicKey: PublicKey, m: bigint): bigint {
 function RSADP(privateKey: PrivateKey, c: bigint): bigint {
   const { n } = privateKey;
   if (c < _0n || c >= n) throw new Error('ciphertext representative out of range'); // Step 1
-  return pow(c, privateKey.d, n); // m = c^d mod n
+  return rsaPrivatePow(privateKey, c); // m = c^d mod n
 }
 
 /**
@@ -290,7 +342,7 @@ function RSASP1(privateKey: PrivateKey, m: bigint): bigint {
   const { n } = privateKey;
   // Step 1: Check if m is between 0 and n - 1
   if (m < _0n || m >= n) throw new Error('message representative out of range'); // Step 1
-  return pow(m, privateKey.d, n); // s = m^d mod n
+  return rsaPrivatePow(privateKey, m); // s = m^d mod n
 }
 
 /**
@@ -312,6 +364,7 @@ function RSAVP1(publicKey: { n: bigint; e: bigint }, s: bigint): bigint | false 
 // Exported API
 /**
  * Generates an RSA key pair.
+ * Unlike imported-key validation, generation requires a modulus of at least 2048 bits.
  *
  * @param nlen - Bit length of the RSA modulus to generate.
  * @param e - Public exponent for the key pair.
@@ -330,7 +383,7 @@ export function keygen(
   nlen: number,
   e: bigint = _65537n,
   randFn: TArg<RandFn> = randomBytes
-): { publicKey: { e: bigint; n: bigint }; privateKey: { d: bigint; n: bigint } } {
+): { publicKey: PublicKey; privateKey: { d: bigint; e: bigint; n: bigint } } {
   if (!Number.isSafeInteger(nlen) || nlen <= 0) throw new Error('wrong nlen');
   for (;;) {
     const { p, q } = IFCPrimes(nlen, e, undefined, undefined, randFn);
@@ -342,7 +395,7 @@ export function keygen(
     // FIPS 186-5 Appendix A.1.1 requires `d = e^-1 mod LCM(p - 1, q - 1)`
     // and `2^(nlen/2) < d`; in the rare small-d case it says new p, q, and d shall be determined.
     if (d <= _1n << BigInt(nlen / 2)) continue;
-    return { publicKey: { e, n }, privateKey: { d, n } };
+    return { publicKey: { e, n }, privateKey: { d, e, n } };
   }
 }
 
@@ -505,6 +558,9 @@ function EMSA_PSS_VERIFY(
 
 /**
  * EMSA-PSS: improved EMSA, based on the probabilistic signature scheme
+ * The caller-selected hash is not policy-checked. SHA-1 signing remains available for compatibility
+ * but is collision-unsafe; use SHA-256 or stronger for new signatures and SHA-1 only when verifying
+ * old signatures.
  * @param hash - Hash function used to digest the message.
  * @param mgfHash - Mask-generation function used inside PSS encoding.
  * @param sLen - Salt length in bytes.
@@ -530,12 +586,12 @@ export const PSS = (
   sign(privateKey: PrivateKey, M: TArg<Uint8Array>): TRet<Uint8Array> {
     validatePrivateKey(privateKey);
     M = ensureBytes('message', M);
-    const { n, d } = privateKey;
+    const { n } = privateKey;
     const k = Math.ceil(n.toString(16).length / 2);
     const emBits = n.toString(2).length - 1;
     const EM = EMSA_PSS_ENCODE(M, emBits, { hash, mgfHash, sLen });
     const m = OS2IP(EM); // Step 2a
-    const s = RSASP1({ n, d }, m); // Step 2b
+    const s = RSASP1(privateKey, m); // Step 2b
     // RFC 8017 §8.1.1 step 2c serializes the signature representative to k octets; emLen only describes the EMSA-PSS encoded message width.
     return I2OSP(s, k); // Step 2c
   },
@@ -586,7 +642,12 @@ function EMSA_PKCS1_V1_5_ENCODE(
 }
 
 /**
- * RSAES-PKCS1-v1_5: older Encryption/decryption Scheme (ES) as first standardized in version 1.5 of PKCS #1. Known-vulnerable.
+ * RSAES-PKCS1-v1_5: older encryption/decryption scheme. Known-vulnerable.
+ *
+ * `decrypt()` returns plaintext for valid padding and throws for invalid padding. Do not expose that
+ * distinction to an attacker: it forms a Bleichenbacher oracle. Prefer OAEP for new protocols.
+ * Generic variable-length decryption cannot provide the fixed-length implicit rejection required by
+ * legacy online protocols.
  * @example
  * Older PKCS#1 v1.5 encryption still round-trips through the same keypair.
  * ```ts
@@ -610,7 +671,7 @@ export const PKCS1_KEM: TRet<KEM> = /* @__PURE__ */ Object.freeze({
     const PS = new Uint8Array(psLen); // Step 2a
     // RFC 8017 §7.2.1 step 2a: PS must contain only nonzero random octets; the step-1 length bound guarantees PS is at least 8 bytes long here.
     // Rejection-sample in batches: draw the remaining count, keep nonzero octets.
-    for (let i = 0; i < psLen; ) {
+    for (let i = 0; i < psLen;) {
       const rnd = randomBytes(psLen - i);
       for (let j = 0; j < rnd.length; j++) if (rnd[j] !== 0) PS[i++] = rnd[j];
     }
@@ -690,18 +751,22 @@ const PKCS1 = (hash: TArg<Hash>, prefixHex: string): TRet<IPKCS> => {
     sign(privateKey: PrivateKey, M: TArg<Uint8Array>): TRet<Uint8Array> {
       validatePrivateKey(privateKey);
       M = ensureBytes('message', M);
-      const { n, d } = privateKey;
+      const { n } = privateKey;
       const k = Math.ceil(n.toString(16).length / 2);
       const EM = EMSA_PKCS1_V1_5_ENCODE(hash, prefix, M, k); // Step 1
       const m = OS2IP(EM); // Step 2a
-      const s = RSASP1({ n, d }, m); // Step 2b
+      const s = RSASP1(privateKey, m); // Step 2b
       return I2OSP(s, k); // Step 2c
     },
   });
 };
 
 // Encoded OIDs
-/** PKCS#1 v1.5 signer using SHA-1. */
+/**
+ * Legacy PKCS#1 v1.5 SHA-1 signer and verifier.
+ * SHA-1 signing is collision-unsafe and remains available only for compatibility. Do not call
+ * `sign()` for new signatures; retain this helper only where old SHA-1 signatures must be verified.
+ */
 // RFC 8017 §9.2 note 1 / Appendix B.1: `3021300906052b0e03021a05000414` is the DER DigestInfo prefix for id-sha1 with NULL parameters and a 20-byte digest.
 export const PKCS1_SHA1: TRet<IPKCS> = /* @__PURE__ */ PKCS1(
   sha1,

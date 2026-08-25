@@ -126,6 +126,48 @@ const isProbablePrimeDSA_P = (L: number, n: bigint, randFn: TArg<RandFn> = rando
 const isProbablePrimeDSA_Q = (N: number, n: bigint, randFn: TArg<RandFn> = randomBytes) =>
   isProbablePrime(n, N === 160 ? 19 : N === 224 ? 24 : 27, randFn);
 
+const DSA_SIZE_PAIRS: Readonly<Record<number, readonly number[]>> = /* @__PURE__ */ Object.freeze({
+  // 1024/160 is retained as an explicitly supported legacy pair (~80-bit strength).
+  1024: /* @__PURE__ */ Object.freeze([160]),
+  2048: /* @__PURE__ */ Object.freeze([224, 256]),
+  3072: /* @__PURE__ */ Object.freeze([256]),
+});
+
+function requireDSASizePair(L: number, N: number): void {
+  const possibleN = DSA_SIZE_PAIRS[L];
+  if (!possibleN || !possibleN.includes(N))
+    throw new Error(`Invalid L/N pair: possible N=${possibleN || 'none'}`);
+}
+
+type DSAValidatedPrimes = { p: bigint; q: bigint };
+type DSAValidatedDomain = DSAValidatedPrimes & { g: bigint };
+const DSA_VALIDATION_CACHE_SIZE = 16;
+const validatedDSAPrimes: DSAValidatedPrimes[] = [];
+const validatedDSADomains: DSAValidatedDomain[] = [];
+
+function cacheValidated<T>(cache: T[], value: T): void {
+  cache.push(value);
+  if (cache.length > DSA_VALIDATION_CACHE_SIZE) cache.shift();
+}
+
+function validateDSADomain(p: bigint, q: bigint, g: bigint): void {
+  if (validatedDSADomains.some((domain) => domain.p === p && domain.q === q && domain.g === g))
+    return;
+  const L = p.toString(2).length;
+  const N = q.toString(2).length;
+  requireDSASizePair(L, N);
+  if (g <= _1n || g >= p) throw new Error('invalid DSA generator range');
+  if ((p - _1n) % q !== _0n) throw new Error('invalid DSA domain relation');
+  const primesCached = validatedDSAPrimes.some((primes) => primes.p === p && primes.q === q);
+  if (!primesCached) {
+    if (!isProbablePrimeDSA_Q(N, q) || !isProbablePrimeDSA_P(L, p))
+      throw new Error('non-prime DSA parameters');
+    cacheValidated(validatedDSAPrimes, { p, q });
+  }
+  if (pow(g, q, p) !== _1n) throw new Error('invalid DSA subgroup generator');
+  cacheValidated(validatedDSADomains, { p, q, g });
+}
+
 /** DSA domain parameters and hash function. */
 export type DSAParams = {
   /** Prime modulus for the DSA group, usually at least 1024 bits. */
@@ -164,13 +206,9 @@ function genDSAPrimes(
 ) {
   if (!Number.isSafeInteger(L) || !Number.isSafeInteger(N)) throw new Error('wrong L/N params');
   ahash(hash);
-  // From FIPS186-4: 4.2 Selection of Parameter Sizes and Hash Functions for DSA
-  const pairs: Record<number, number[]> = { 1024: [160], 2048: [224, 256], 3072: [256] };
-  const possibleN = pairs[L];
   // This legacy FIPS 186-4 parameter table is finite; validate L before
   // checking N so unsupported sizes fail as input errors, not internal TypeErrors.
-  if (!possibleN || !possibleN.includes(N))
-    throw new Error(`Invalid L/N pair: possible N=${possibleN || 'none'}`);
+  requireDSASizePair(L, N);
   const outlen = hash.outputLen * 8;
   // NOTE: we ask user to provide seed instead
   if (!Number.isSafeInteger(seed) && !isBytes(seed) && seed !== undefined)
@@ -210,7 +248,7 @@ function genDSAPrimes(
       }
       let W = V[0];
       for (let i = 1; i < n; i++) W += V[i] << shifts[i];
-      W += V[n] % pow2b << shifts[n]; // 11.2
+      W += (V[n] % pow2b) << shifts[n]; // 11.2
       const X = W + pMin; // 11.3: 0 ≤ W < 2L–1; hence, 2L–1 ≤ X < 2L
       const c = X % q2; // 11.4
       const p = X - (c - _1n); // 11.5: p ≡ 1 (mod 2q).
@@ -244,7 +282,7 @@ function genDSAGenerator(res: ReturnType<typeof genDSAPrimes>, index: number): b
   }
   const e = (p - _1n) / q; // Step 3
   const ggen = hexToBytes('6767656e'); // 'ggen' in ascii
-  for (let count = 0; ; ) {
+  for (let count = 0; ;) {
     count++; // Step 5
     count &= 0xffff; // 16 bit integer
     if (count === 0) throw new Error('counter wrapped'); // Step 6
@@ -262,6 +300,11 @@ function genDSAGenerator(res: ReturnType<typeof genDSAPrimes>, index: number): b
 
 /**
  * Generate DSA domain parameters.
+ * The legacy 1024/160 pair remains supported for compatibility but provides only about 80 bits of
+ * classical security. Prefer 2048/224, 2048/256, or 3072/256 for existing DSA interoperability;
+ * FIPS 186-5 no longer approves DSA signature generation for new applications. Caller-selected
+ * hashes are not policy-checked; SHA-1 remains accepted for compatibility but is collision-unsafe
+ * and should be used only when reproducing legacy domains for old-signature verification.
  * @param L - The desired length of the prime p (in bits).
  * @param N - The desired length of the prime q (in bits).
  * @param hash - Hash function used to derive the primes and generator.
@@ -274,8 +317,8 @@ function genDSAGenerator(res: ReturnType<typeof genDSAPrimes>, index: number): b
  * Generate parameters once, then reuse them when constructing a DSA helper.
  * ```ts
  * import { DSA, genDSAParams } from 'micro-rsa-dsa-dh/dsa.js';
- * import { sha1 } from '@noble/hashes/legacy.js';
- * const params = genDSAParams(1024, 160, sha1, 1, 160);
+ * import { sha256 } from '@noble/hashes/sha2.js';
+ * const params = genDSAParams(2048, 256, sha256, 1, 256);
  * const dsa = DSA(params);
  * const privateKey = dsa.randomPrivateKey();
  * privateKey;
@@ -382,16 +425,20 @@ export function createHmacDrbg<T>(
 
 /**
  * Simplified DSA implementation focusing on simplicity and basic functionality.
+ * The domain's caller-selected hash is not policy-checked. SHA-1 signing remains available for
+ * compatibility but is collision-unsafe; use SHA-1 only to verify old signatures and use an
+ * approved SHA-2/SHA-3 hash when existing DSA interoperability is unavoidable.
  * @param params - DSA domain parameters and hash function. See {@link DSAParams}.
  * @returns DSA key generation, signing, and verification helpers.
- * @throws If the supplied DSA domain parameters or hash function are invalid. {@link Error}
+ * @throws If the supplied DSA size pair, primes, subgroup relation, generator, or hash is invalid.
+ *   {@link Error}
  * @example
  * Generate a fresh DSA keypair and sign a message with it.
  * ```ts
  * import { deepStrictEqual } from 'node:assert';
  * import { DSA, genDSAParams } from 'micro-rsa-dsa-dh/dsa.js';
- * import { sha1 } from '@noble/hashes/legacy.js';
- * const dsa = DSA(genDSAParams(1024, 160, sha1, 1, 160));
+ * import { sha256 } from '@noble/hashes/sha2.js';
+ * const dsa = DSA(genDSAParams(2048, 256, sha256, 1, 256));
  * const privateKey = dsa.randomPrivateKey();
  * const publicKey = dsa.getPublicKey(privateKey);
  * const msg = new Uint8Array([1, 2, 3]);
@@ -404,6 +451,7 @@ export const DSA = (params: TArg<DSAParams>): TRet<DSAApi> => {
   if (typeof p !== 'bigint' || typeof q !== 'bigint' || typeof g !== 'bigint')
     throw new Error('wrong DSAParams');
   ahash(hash);
+  validateDSADomain(p, q, g);
   const fieldBytes = getFieldBytesLength(q);
   const fieldBits = q.toString(2).length;
   // RFC6979: ensure ECDSA msg is X bytes and < N. RFC suggests optional truncating via bits2octets.

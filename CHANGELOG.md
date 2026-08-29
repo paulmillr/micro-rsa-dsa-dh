@@ -1,6 +1,6 @@
 # Changelog for micro-rsa-dsa-dh
 
-## 0.3.1 (2026-08-29)
+## 0.4.0 (2026-08-29)
 
 - Hardened all algorithms: stricter parameter and type validation across RSA, DSA, DH, ElGamal and primality testing
 - Made custom DH groups require validated `{ p, q, g }` parameters with a prime-order subgroup; moved obsolete modp1 / modp2 / modp5 groups to `LegacyDHGroups`, which need an explicit `allowUnsafeLegacy` opt-in
